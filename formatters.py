@@ -122,30 +122,40 @@ def format_campaigns(campaigns: list) -> str:
 # ─── ПРИХОДЫ ПО НЕДЕЛЯМ ──────────────────────────────────────────────────────
 
 def format_income_weeks(rows: list) -> str:
-    # Группируем по WB-неделе (воскресенье → суббота) — тогда Основной + По выкупам суммируются
-    weeks = {}  # sunday_date -> total ppvz_for_pay
+    # Группируем по realizationreport_id — строки продаж и логистики/хранения
+    # одного отчёта имеют разные rr_dt, поэтому нельзя группировать по дате
+    reports = {}  # rid -> {total, min_date}
     for r in rows:
+        rid = r.get("realizationreport_id") or 0
+        if not rid:
+            continue
+        amount = float(r.get("ppvz_for_pay") or 0)
         raw = str(r.get("rr_dt") or r.get("create_dt") or "")[:10]
+        if rid not in reports:
+            reports[rid] = {"total": 0.0, "min_date": raw}
+        reports[rid]["total"] += amount
+        if raw and raw < reports[rid]["min_date"]:
+            reports[rid]["min_date"] = raw
+
+    # Неделю определяем по минимальной дате в отчёте (это дата внутри периода)
+    weeks = {}
+    for data in reports.values():
+        raw = data["min_date"]
         if not raw:
             continue
         try:
             d = datetime.fromisoformat(raw).date()
         except Exception:
             continue
-        # Найти понедельник этой недели (WB-неделя: понедельник–воскресенье)
         monday = d - timedelta(days=d.weekday())
-        weeks[monday] = weeks.get(monday, 0.0) + float(r.get("ppvz_for_pay") or 0)
+        weeks[monday] = weeks.get(monday, 0.0) + data["total"]
 
-    # Берём последние 4 недели
     sorted_weeks = sorted(weeks.items())[-4:]
-
     total = sum(v for _, v in sorted_weeks)
     lines = ["💵 *ПРИХОДЫ WB — 4 недели*", ""]
     for i, (monday, amount) in enumerate(sorted_weeks, 1):
         sunday = monday + timedelta(days=6)
-        d_from = monday.strftime("%d.%m")
-        d_to   = sunday.strftime("%d.%m")
-        lines.append(f"📅 *Неделя {i}:* {d_from} — {d_to}")
+        lines.append(f"📅 *Неделя {i}:* {monday.strftime('%d.%m')} — {sunday.strftime('%d.%m')}")
         lines.append(f"   ✅ К получению: *{fmt(amount)} ₽*")
         lines.append("")
     lines.append(f"💰 *Итого за месяц: {fmt(total)} ₽*")
