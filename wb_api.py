@@ -54,14 +54,33 @@ async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_s
     return results
 
 async def get_active_campaigns(client: httpx.AsyncClient) -> list:
-    # Получить активные кампании (status=9)
+    # Получить активные кампании через v2
     resp = await client.get(
-        "https://advert-api.wildberries.ru/adv/v1/promotion/adverts",
-        params={"status": 9, "limit": 50, "offset": 0},
+        "https://advert-api.wildberries.ru/adv/v2/promotion/count",
         headers=HEADERS,
     )
     resp.raise_for_status()
-    data = resp.json()
+    counts = resp.json()
+    # active status = 9, собираем все id активных
+    active_count = 0
+    for item in (counts if isinstance(counts, list) else []):
+        if item.get("status") == 9:
+            active_count = item.get("count", 0)
+
+    # Получить список кампаний по статусу 9
+    resp2 = await client.post(
+        "https://advert-api.wildberries.ru/adv/v1/promotion/adverts",
+        json={"status": 9, "limit": 50, "offset": 0},
+        headers=HEADERS,
+    )
+    if resp2.status_code != 200:
+        # fallback: попробовать allact
+        resp2 = await client.get(
+            "https://advert-api.wildberries.ru/adv/v1/allact",
+            headers=HEADERS,
+        )
+        resp2.raise_for_status()
+    data = resp2.json()
     campaigns = data if isinstance(data, list) else (data.get("adverts") or data.get("data") or [])
 
     # Для каждой кампании получить баланс и статистику
