@@ -53,6 +53,76 @@ async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_s
         results.extend(rows)
     return results
 
+async def get_active_campaigns(client: httpx.AsyncClient) -> list:
+    # Получить активные кампании (status=9)
+    resp = await client.get(
+        "https://advert-api.wildberries.ru/adv/v1/promotion/adverts",
+        params={"status": 9, "limit": 50, "offset": 0},
+        headers=HEADERS,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    campaigns = data if isinstance(data, list) else (data.get("adverts") or data.get("data") or [])
+
+    # Для каждой кампании получить баланс и статистику
+    result = []
+    date_from = msk_date(7)
+    date_to = msk_date(0)
+
+    for camp in campaigns:
+        camp_id = camp.get("advertId") or camp.get("id") or 0
+        name = camp.get("name") or f"Кампания {camp_id}"
+
+        # Баланс
+        balance = 0
+        try:
+            b_resp = await client.get(
+                "https://advert-api.wildberries.ru/adv/v1/budget",
+                params={"id": camp_id},
+                headers=HEADERS,
+            )
+            if b_resp.status_code == 200:
+                b_data = b_resp.json()
+                balance = float(b_data.get("total") or b_data.get("balance") or 0)
+        except Exception:
+            pass
+
+        # Статистика за 7 дней
+        views = orders = spend = ctr = 0
+        try:
+            s_resp = await client.post(
+                "https://advert-api.wildberries.ru/adv/v2/fullstats",
+                json=[{"id": camp_id, "intervals": [{"begin": date_from, "end": date_to}]}],
+                headers=HEADERS,
+            )
+            if s_resp.status_code == 200:
+                s_data = s_resp.json()
+                stats = s_data[0] if isinstance(s_data, list) and s_data else {}
+                days = stats.get("days") or []
+                for day in days:
+                    apps = day.get("apps") or []
+                    for app in apps:
+                        nm_list = app.get("nm") or []
+                        for nm in nm_list:
+                            views += int(nm.get("views") or 0)
+                            orders += int(nm.get("orders") or 0)
+                            spend += float(nm.get("sum") or 0)
+                ctr = round(spend / views * 100, 2) if views > 0 else 0
+        except Exception:
+            pass
+
+        result.append({
+            "id": camp_id,
+            "name": name,
+            "balance": round(balance),
+            "views": views,
+            "orders": orders,
+            "spend": round(spend),
+            "ctr": ctr,
+        })
+
+    return result
+
 async def get_stock_report(client: httpx.AsyncClient) -> list:
     # Создать задачу
     resp = await client.get(

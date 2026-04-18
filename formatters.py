@@ -62,6 +62,30 @@ def format_sales(rows: list) -> str:
     header = f"📊 *WB ЗАКАЗЫ: Вчера ({day1_label}) / Позавчера ({day2_label})*\n"
     return header + "\n" + "\n".join(lines)
 
+def format_campaigns(campaigns: list) -> str:
+    if not campaigns:
+        return "📢 Активных кампаний нет."
+
+    lines = ["📢 *АКТИВНЫЕ КАМПАНИИ*", ""]
+    low_balance = []
+
+    for c in campaigns:
+        bal_icon = "🔴" if c["balance"] < 100 else "💰"
+        lines.append(f"*{c['name']}* (ID: {c['id']})")
+        lines.append(f"{bal_icon} Баланс: {fmt(c['balance'])} ₽")
+        lines.append(f"📊 Затраты: {fmt(c['spend'])} ₽ | Показы: {fmt(c['views'])}")
+        lines.append(f"🛒 Заказы: {c['orders']} | CTR: {c['ctr']}%")
+        lines.append("")
+        if c["balance"] < 100:
+            low_balance.append(c["name"])
+
+    if low_balance:
+        lines.append("⚠️ *Пополни баланс:*")
+        for name in low_balance:
+            lines.append(f"— {name}")
+
+    return "\n".join(lines)
+
 def format_stock(items: list) -> str:
     THRESHOLD = 50
     processed = []
