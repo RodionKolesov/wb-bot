@@ -225,48 +225,63 @@ async def get_finance_report(client: httpx.AsyncClient) -> list:
 async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
     date_from = msk_date(7)
     date_to = msk_date(1)
-    body = {
-        "brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": nm_ids,
-        "timezone": "Europe/Moscow",
-        "period": {"begin": date_from, "end": date_to},
-        "page": 1,
-    }
-    for url in [
-        "https://seller-analytics-api.wildberries.ru/api/analytics/v2/nm-report/grouped",
-        "https://seller-analytics-api.wildberries.ru/api/analytics/v1/nm-report/grouped",
-    ]:
-        resp = await client.post(url, json=body, headers=HEADERS)
-        print(f"[DEBUG] funnel {url} → {resp.status_code}")
-        if resp.status_code == 200:
-            data = resp.json()
-            cards = (data.get("data") or {}).get("cards") or data.get("cards") or []
-            if cards:
-                return cards
+    # Пробуем разные варианты эндпоинта и параметров
+    attempts = [
+        ("https://seller-analytics-api.wildberries.ru/api/analytics/v2/nm-report/grouped",
+         {"brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": [],
+          "timezone": "Europe/Moscow", "period": {"begin": date_from, "end": date_to}, "page": 1}),
+        ("https://seller-analytics-api.wildberries.ru/api/analytics/v1/nm-report/grouped",
+         {"brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": [],
+          "timezone": "Europe/Moscow", "period": {"begin": date_from, "end": date_to}, "page": 1}),
+        ("https://seller-analytics-api.wildberries.ru/api/analytics/v2/nm-report/detail",
+         {"brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": [],
+          "timezone": "Europe/Moscow", "period": {"begin": date_from, "end": date_to}, "page": 1}),
+    ]
+    for url, body in attempts:
+        try:
+            resp = await client.post(url, json=body, headers=HEADERS)
+            print(f"[DEBUG] funnel {url.split('/')[-1]} → {resp.status_code}: {resp.text[:100]}")
+            if resp.status_code == 200:
+                data = resp.json()
+                cards = (data.get("data") or {}).get("cards") or data.get("cards") or []
+                if cards:
+                    return cards
+        except Exception as e:
+            print(f"[DEBUG] funnel error: {e}")
     return []
 
 # ─── РЕЙТИНГ И ОТЗЫВЫ ────────────────────────────────────────────────────────
 
 async def get_ratings(client: httpx.AsyncClient) -> dict:
     result = {"unanswered": 0, "feedbacks": []}
+
+    # Получаем отзывы без ответа напрямую
+    try:
+        fb_resp = await client.get(
+            "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
+            params={"isAnswered": "false", "take": 50, "skip": 0, "order": "dateDesc"},
+            headers=HEADERS,
+        )
+        print(f"[DEBUG] feedbacks status: {fb_resp.status_code}")
+        if fb_resp.status_code == 200:
+            data = fb_resp.json()
+            feedbacks = (data.get("data") or {}).get("feedbacks") or data.get("feedbacks") or []
+            result["feedbacks"] = feedbacks
+            result["unanswered"] = len(feedbacks)
+    except Exception as e:
+        print(f"[DEBUG] feedbacks error: {e}")
+
+    # Пробуем также count endpoint для точного числа
     try:
         count_resp = await client.get(
             "https://feedbacks-api.wildberries.ru/api/v1/feedbacks/count-unanswered",
             headers=HEADERS,
         )
         if count_resp.status_code == 200:
-            result["unanswered"] = count_resp.json().get("countUnanswered", 0)
-    except Exception:
-        pass
-
-    try:
-        fb_resp = await client.get(
-            "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
-            params={"isAnswered": "false", "take": 10, "skip": 0, "order": "dateDesc"},
-            headers=HEADERS,
-        )
-        if fb_resp.status_code == 200:
-            data = fb_resp.json()
-            result["feedbacks"] = (data.get("data") or {}).get("feedbacks") or []
+            cnt = count_resp.json()
+            total = cnt.get("countUnanswered") or cnt.get("count") or 0
+            if total > result["unanswered"]:
+                result["unanswered"] = total
     except Exception:
         pass
 
@@ -275,11 +290,10 @@ async def get_ratings(client: httpx.AsyncClient) -> dict:
 # ─── ABC-АНАЛИЗ ───────────────────────────────────────────────────────────────
 
 async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
-    date_from = msk_date(30)
+    # API ограничен ~7 днями для этого эндпоинта
+    date_from = msk_date(7)
     date_to = msk_date(1)
-    print(f"[DEBUG] abc: {len(nm_ids)} nmIds, {date_from} → {date_to}")
     rows = await get_sales_history(client, nm_ids, date_from, date_to)
-    print(f"[DEBUG] abc: got {len(rows)} rows")
 
     product_map = {}
     for row in rows:
