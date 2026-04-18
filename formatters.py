@@ -132,19 +132,19 @@ def format_income_weeks(rows: list) -> str:
             d = datetime.fromisoformat(raw).date()
         except Exception:
             continue
-        # Найти воскресенье этой недели (WB-неделя: воскресенье–суббота)
-        sunday = d - timedelta(days=(d.weekday() + 1) % 7)
-        weeks[sunday] = weeks.get(sunday, 0.0) + float(r.get("ppvz_for_pay") or 0)
+        # Найти понедельник этой недели (WB-неделя: понедельник–воскресенье)
+        monday = d - timedelta(days=d.weekday())
+        weeks[monday] = weeks.get(monday, 0.0) + float(r.get("ppvz_for_pay") or 0)
 
     # Берём последние 4 недели
     sorted_weeks = sorted(weeks.items())[-4:]
 
     total = sum(v for _, v in sorted_weeks)
     lines = ["💵 *ПРИХОДЫ WB — 4 недели*", ""]
-    for i, (sunday, amount) in enumerate(sorted_weeks, 1):
-        saturday = sunday + timedelta(days=6)
-        d_from = sunday.strftime("%d.%m")
-        d_to   = saturday.strftime("%d.%m")
+    for i, (monday, amount) in enumerate(sorted_weeks, 1):
+        sunday = monday + timedelta(days=6)
+        d_from = monday.strftime("%d.%m")
+        d_to   = sunday.strftime("%d.%m")
         lines.append(f"📅 *Неделя {i}:* {d_from} — {d_to}")
         lines.append(f"   ✅ К получению: *{fmt(amount)} ₽*")
         lines.append("")
