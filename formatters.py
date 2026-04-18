@@ -121,31 +121,31 @@ def format_campaigns(campaigns: list) -> str:
 
 # ─── ПРИХОДЫ ПО НЕДЕЛЯМ ──────────────────────────────────────────────────────
 
-def format_income_weeks(rows: list) -> str:
-    # WB финализирует отчёт в понедельник после окончания недели (дата формирования = rr_dt).
-    # Финализированные строки: rr_dt = понедельник, ppvz_for_pay уже включает все вычеты.
-    # Неделя расчёта = rr_dt - 7 дней (предыдущая неделя пн–вс).
-    weeks = {}
-    for r in rows:
-        raw = str(r.get("rr_dt") or r.get("create_dt") or "")[:10]
-        if not raw:
+def format_income_weeks(reports: list) -> str:
+    # Данные из нового Finance API: forPaySum = Итого к оплате per report
+    # Группируем по dateFrom (период), суммируем Основной + По выкупам
+    weeks = {}  # dateFrom[:10] -> {total, d_to}
+    for r in reports:
+        d_from = str(r.get("dateFrom") or "")[:10]
+        d_to   = str(r.get("dateTo") or "")[:10]
+        if not d_from:
             continue
-        try:
-            d = datetime.fromisoformat(raw).date()
-        except Exception:
-            continue
-        if d.weekday() != 0:  # берём только строки с rr_dt = понедельник
-            continue
-        settlement_monday = d - timedelta(days=7)
-        weeks[settlement_monday] = weeks.get(settlement_monday, 0.0) + float(r.get("ppvz_for_pay") or 0)
+        amount = float(r.get("forPaySum") or 0)
+        if d_from not in weeks:
+            weeks[d_from] = {"total": 0.0, "d_to": d_to}
+        weeks[d_from]["total"] += amount
 
     sorted_weeks = sorted(weeks.items())[-4:]
-    total = sum(v for _, v in sorted_weeks)
+    total = sum(v["total"] for _, v in sorted_weeks)
     lines = ["💵 *ПРИХОДЫ WB — 4 недели*", ""]
-    for i, (monday, amount) in enumerate(sorted_weeks, 1):
-        sunday = monday + timedelta(days=6)
-        lines.append(f"📅 *Неделя {i}:* {monday.strftime('%d.%m')} — {sunday.strftime('%d.%m')}")
-        lines.append(f"   ✅ К получению: *{fmt(amount)} ₽*")
+    for i, (d_from, v) in enumerate(sorted_weeks, 1):
+        try:
+            df = datetime.fromisoformat(d_from).strftime("%d.%m")
+            dt = datetime.fromisoformat(v["d_to"]).strftime("%d.%m")
+        except Exception:
+            df, dt = d_from[:5], v["d_to"][:5]
+        lines.append(f"📅 *Неделя {i}:* {df} — {dt}")
+        lines.append(f"   ✅ К получению: *{fmt(v['total'])} ₽*")
         lines.append("")
     lines.append(f"💰 *Итого за месяц: {fmt(total)} ₽*")
     return "\n".join(lines)
