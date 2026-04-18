@@ -17,6 +17,8 @@ def init(api_key: str, ads_key: str = None):
     HEADERS["Authorization"] = api_key
     ADS_HEADERS["Authorization"] = ads_key or api_key
 
+# ─── КАРТОЧКИ ────────────────────────────────────────────────────────────────
+
 async def get_cards(client: httpx.AsyncClient) -> list[int]:
     resp = await client.post(
         "https://content-api.wildberries.ru/content/v2/get/cards/list",
@@ -26,8 +28,9 @@ async def get_cards(client: httpx.AsyncClient) -> list[int]:
     resp.raise_for_status()
     data = resp.json()
     cards = data.get("cards") or data.get("data", {}).get("cards") or []
-    nm_ids = list({int(c.get("nmID") or c.get("nmId") or 0) for c in cards if c.get("nmID") or c.get("nmId")})
-    return nm_ids
+    return list({int(c.get("nmID") or c.get("nmId") or 0) for c in cards if c.get("nmID") or c.get("nmId")})
+
+# ─── ПРОДАЖИ ─────────────────────────────────────────────────────────────────
 
 async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_start: str, date_end: str) -> list:
     results = []
@@ -41,22 +44,50 @@ async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_s
                 "brandNames": [], "subjectIds": [], "tagIds": [],
                 "skipDeletedNm": False,
                 "orderBy": {"field": "ordersSumRub", "mode": "desc"},
-                "limit": 20, "offset": 0,
+                "limit": 100, "offset": 0,
             },
             headers=HEADERS,
         )
         resp.raise_for_status()
         body = resp.json()
         rows = body if isinstance(body, list) else body.get("data") or []
-        if rows and not results:
-            first = rows[0]
-            hist = (first.get("history") or [{}])[0]
-            print("[DEBUG] history day keys:", list(hist.keys()))
         results.extend(rows)
     return results
 
+# ─── СКЛАД ────────────────────────────────────────────────────────────────────
+
+async def get_stock_report(client: httpx.AsyncClient) -> list:
+    resp = await client.get(
+        "https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains",
+        params={"groupBySa": "true"},
+        headers=HEADERS,
+    )
+    resp.raise_for_status()
+    task_id = resp.json()["data"]["taskId"]
+
+    for _ in range(12):
+        await asyncio.sleep(5)
+        status_resp = await client.get(
+            f"https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains/tasks/{task_id}/status",
+            headers=HEADERS,
+        )
+        status_resp.raise_for_status()
+        body = status_resp.json()
+        status = (body.get("data") or {}).get("status") or body.get("status") or ""
+        if status in ("done", "complete", "completed", "finish", "finished"):
+            break
+
+    dl_resp = await client.get(
+        f"https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains/tasks/{task_id}/download",
+        headers=HEADERS,
+    )
+    dl_resp.raise_for_status()
+    data = dl_resp.json()
+    return data if isinstance(data, list) else data.get("data") or []
+
+# ─── КАМПАНИИ ────────────────────────────────────────────────────────────────
+
 async def get_active_campaigns(client: httpx.AsyncClient) -> list:
-    # Шаг 1: получить список кампаний сгруппированных по статусу
     r = await client.get(
         "https://advert-api.wildberries.ru/adv/v1/promotion/count",
         headers=ADS_HEADERS,
@@ -64,7 +95,6 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
     r.raise_for_status()
     data = r.json()
 
-    # Извлечь только активные (status=9)
     groups = data.get("adverts") or []
     campaign_ids = []
     for group in groups:
@@ -77,7 +107,6 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
     if not campaign_ids:
         return []
 
-    # Шаг 2: детали кампаний
     info_resp = await client.post(
         "https://advert-api.wildberries.ru/adv/v2/adverts",
         json={"ids": campaign_ids},
@@ -88,7 +117,6 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
         raw = info_resp.json()
         info_list = raw if isinstance(raw, list) else (raw.get("data") or [])
 
-    # Шаг 3: статистика за 7 дней (v3!)
     date_from = msk_date(6)
     date_to = msk_date(0)
     ids_str = ",".join(str(i) for i in campaign_ids)
@@ -101,7 +129,6 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
         raw = stats_resp.json()
         stats_list = raw if isinstance(raw, list) else (raw.get("data") or [])
 
-    # Шаг 4: баланс каждой кампании
     budgets = {}
     for camp_id in campaign_ids:
         try:
@@ -115,7 +142,6 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
         except Exception:
             budgets[camp_id] = 0
 
-    # Собрать карты
     info_by_id = {}
     for row in info_list:
         rid = int(row.get("id") or row.get("advertId") or 0)
@@ -141,7 +167,6 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
                 spend += float(d.get("sum") or d.get("spend") or 0)
         stats_by_id[rid] = {"views": views, "clicks": clicks, "orders": orders, "spend": spend}
 
-    # Собрать итог
     campaigns = []
     for camp_id in campaign_ids:
         info = info_by_id.get(camp_id) or {}
@@ -158,99 +183,108 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
             "spend": round(stat["spend"]),
         })
 
-    # Только кампании с активностью, сортировка по затратам
     campaigns = [c for c in campaigns if c["views"] > 0 or c["orders"] > 0 or c["spend"] > 0]
     campaigns.sort(key=lambda x: -x["spend"])
     return campaigns
 
-    # Для каждой кампании получить баланс и статистику
-    result = []
+# ─── ФИНАНСЫ ─────────────────────────────────────────────────────────────────
+
+async def get_finance_report(client: httpx.AsyncClient) -> list:
     date_from = msk_date(7)
-    date_to = msk_date(0)
+    date_to = msk_date(1)
+    resp = await client.get(
+        "https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod",
+        params={"dateFrom": date_from, "dateTo": date_to, "rrdid": 0, "limit": 100000},
+        headers=HEADERS,
+        timeout=120,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data if isinstance(data, list) else (data.get("data") or [])
 
-    for camp in campaigns:
-        camp_id = camp.get("advertId") or camp.get("id") or 0
-        name = camp.get("name") or f"Кампания {camp_id}"
+# ─── ВОРОНКА ─────────────────────────────────────────────────────────────────
 
-        # Баланс
-        balance = 0
-        try:
-            b_resp = await client.get(
-                "https://advert-api.wildberries.ru/adv/v1/budget",
-                params={"id": camp_id},
-                headers=HEADERS,
-            )
-            if b_resp.status_code == 200:
-                b_data = b_resp.json()
-                balance = float(b_data.get("total") or b_data.get("balance") or 0)
-        except Exception:
-            pass
+async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
+    date_from = msk_date(7)
+    date_to = msk_date(1)
+    resp = await client.post(
+        "https://seller-analytics-api.wildberries.ru/api/analytics/v2/nm-report/grouped/history",
+        json={
+            "brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": nm_ids,
+            "timezone": "Europe/Moscow",
+            "period": {"begin": date_from, "end": date_to},
+            "aggregationLevel": "week",
+        },
+        headers=HEADERS,
+    )
+    if resp.status_code != 200:
+        return []
+    data = resp.json()
+    history = (data.get("data") or {}).get("history") or data.get("history") or []
+    return history
 
-        # Статистика за 7 дней
-        views = orders = spend = ctr = 0
-        try:
-            s_resp = await client.post(
-                "https://advert-api.wildberries.ru/adv/v2/fullstats",
-                json=[{"id": camp_id, "intervals": [{"begin": date_from, "end": date_to}]}],
-                headers=HEADERS,
-            )
-            if s_resp.status_code == 200:
-                s_data = s_resp.json()
-                stats = s_data[0] if isinstance(s_data, list) and s_data else {}
-                days = stats.get("days") or []
-                for day in days:
-                    apps = day.get("apps") or []
-                    for app in apps:
-                        nm_list = app.get("nm") or []
-                        for nm in nm_list:
-                            views += int(nm.get("views") or 0)
-                            orders += int(nm.get("orders") or 0)
-                            spend += float(nm.get("sum") or 0)
-                ctr = round(spend / views * 100, 2) if views > 0 else 0
-        except Exception:
-            pass
+# ─── РЕЙТИНГ И ОТЗЫВЫ ────────────────────────────────────────────────────────
 
-        result.append({
-            "id": camp_id,
-            "name": name,
-            "balance": round(balance),
-            "views": views,
-            "orders": orders,
-            "spend": round(spend),
-            "ctr": ctr,
-        })
+async def get_ratings(client: httpx.AsyncClient) -> dict:
+    result = {"unanswered": 0, "feedbacks": []}
+    try:
+        count_resp = await client.get(
+            "https://feedbacks-api.wildberries.ru/api/v1/feedbacks/count-unanswered",
+            headers=HEADERS,
+        )
+        if count_resp.status_code == 200:
+            result["unanswered"] = count_resp.json().get("countUnanswered", 0)
+    except Exception:
+        pass
+
+    try:
+        fb_resp = await client.get(
+            "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
+            params={"isAnswered": "false", "take": 10, "skip": 0, "order": "dateDesc"},
+            headers=HEADERS,
+        )
+        if fb_resp.status_code == 200:
+            data = fb_resp.json()
+            result["feedbacks"] = (data.get("data") or {}).get("feedbacks") or []
+    except Exception:
+        pass
 
     return result
 
-async def get_stock_report(client: httpx.AsyncClient) -> list:
-    # Создать задачу
-    resp = await client.get(
-        "https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains",
-        params={"groupBySa": "true"},
-        headers=HEADERS,
-    )
-    resp.raise_for_status()
-    task_id = resp.json()["data"]["taskId"]
+# ─── ABC-АНАЛИЗ ───────────────────────────────────────────────────────────────
 
-    # Ждать готовности — опрашиваем статус каждые 5 сек до 60 сек
-    for _ in range(12):
-        await asyncio.sleep(5)
-        status_resp = await client.get(
-            f"https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains/tasks/{task_id}/status",
-            headers=HEADERS,
-        )
-        status_resp.raise_for_status()
-        body = status_resp.json()
-        status = (body.get("data") or {}).get("status") or body.get("status") or ""
-        print(f"[DEBUG] stock status: {status}")
-        if status in ("done", "complete", "completed", "finish", "finished"):
-            break
+async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
+    date_from = msk_date(30)
+    date_to = msk_date(1)
+    rows = await get_sales_history(client, nm_ids, date_from, date_to)
 
-    # Скачать отчёт
-    dl_resp = await client.get(
-        f"https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains/tasks/{task_id}/download",
-        headers=HEADERS,
-    )
-    dl_resp.raise_for_status()
-    data = dl_resp.json()
-    return data if isinstance(data, list) else data.get("data") or []
+    product_map = {}
+    for row in rows:
+        product = row.get("product") or {}
+        history = row.get("history") or []
+        vendor = product.get("vendorCode") or str(product.get("nmId") or "?")
+        total_sum = sum(float(d.get("ordersSumRub") or 0) for d in history)
+        total_count = sum(int(d.get("ordersCount") or 0) for d in history)
+        if vendor not in product_map:
+            product_map[vendor] = {"vendorCode": vendor, "sum": 0, "count": 0}
+        product_map[vendor]["sum"] += total_sum
+        product_map[vendor]["count"] += total_count
+
+    products = sorted(product_map.values(), key=lambda x: -x["sum"])
+    total = sum(p["sum"] for p in products)
+    if total == 0:
+        return []
+
+    cumulative = 0
+    for p in products:
+        cumulative += p["sum"]
+        share = cumulative / total * 100
+        p["cumulative_pct"] = share
+        if share <= 80:
+            p["class"] = "A"
+        elif share <= 95:
+            p["class"] = "B"
+        else:
+            p["class"] = "C"
+
+    return products
