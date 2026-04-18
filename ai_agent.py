@@ -1,30 +1,21 @@
-import google.generativeai as genai
+import httpx
 
 SYSTEM_PROMPT = """Ты опытный коммерческий директор и аналитик Wildberries.
 У тебя есть актуальные данные по магазину продавца (продажи, склад, реклама, финансы).
 Анализируй цифры, находи проблемы, давай конкретные практические советы.
 Отвечай кратко и по делу. Используй числа из данных. Пиши по-русски."""
 
-# История диалога per chat_id: {chat_id: [{"role": "user/model", "parts": ["..."]}]}
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = "llama-3.3-70b-versatile"
+
+_api_key: str = ""
 _histories: dict[int, list] = {}
-# Контекст WB данных per chat_id
 _contexts: dict[int, str] = {}
 
-model = None
-
-def init_gemini(api_key: str):
-    global model
-    genai.configure(api_key=api_key)
-    for model_name in ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-pro"]:
-        try:
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                system_instruction=SYSTEM_PROMPT,
-            )
-            print(f"[AI] Используем модель: {model_name}")
-            break
-        except Exception:
-            continue
+def init_groq(api_key: str):
+    global _api_key
+    _api_key = api_key
+    print(f"[AI] Groq инициализирован, модель: {MODEL}")
 
 def set_context(chat_id: int, context: str):
     _contexts[chat_id] = context
@@ -35,25 +26,42 @@ def clear_history(chat_id: int):
     _contexts.pop(chat_id, None)
 
 async def ask(chat_id: int, question: str) -> str:
-    if model is None:
-        return "❌ Gemini API не настроен. Добавь GEMINI_API_KEY в переменные Railway."
+    if not _api_key:
+        return "❌ GROQ_API_KEY не настроен. Добавь его в переменные Railway."
 
     history = _histories.get(chat_id, [])
     context = _contexts.get(chat_id, "")
 
-    # Первый вопрос — добавляем контекст WB
-    if not history and context:
-        full_question = f"Вот актуальные данные магазина:\n\n{context}\n\nТвой первый анализ и главные рекомендации:"
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    if context:
+        messages.append({
+            "role": "user",
+            "content": f"Вот актуальные данные магазина:\n\n{context}"
+        })
+        messages.append({
+            "role": "assistant",
+            "content": "Данные получил, готов анализировать."
+        })
+
+    messages.extend(history)
+
+    if question:
+        messages.append({"role": "user", "content": question})
     else:
-        full_question = question
+        messages.append({"role": "user", "content": "Проанализируй данные и дай главные рекомендации."})
 
-    chat = model.start_chat(history=history)
-    response = await chat.send_message_async(full_question)
-    text = response.text
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {_api_key}", "Content-Type": "application/json"},
+            json={"model": MODEL, "messages": messages, "max_tokens": 1024, "temperature": 0.7},
+        )
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"]
 
-    # Сохранить историю
-    history.append({"role": "user", "parts": [full_question]})
-    history.append({"role": "model", "parts": [text]})
-    _histories[chat_id] = history[-20:]  # последние 10 пар
+    history.append({"role": "user", "content": question or "Анализ данных"})
+    history.append({"role": "assistant", "content": text})
+    _histories[chat_id] = history[-20:]
 
     return text

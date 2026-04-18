@@ -20,11 +20,11 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WB_API_KEY = os.getenv("WB_API_KEY")
 WB_ADS_KEY = os.getenv("WB_ADS_KEY") or WB_API_KEY
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 wb_api.init(WB_API_KEY, WB_ADS_KEY)
-if GEMINI_API_KEY:
-    ai_agent.init_gemini(GEMINI_API_KEY)
+if GROQ_API_KEY:
+    ai_agent.init_groq(GROQ_API_KEY)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
