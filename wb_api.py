@@ -63,16 +63,18 @@ async def get_stock_report(client: httpx.AsyncClient) -> list:
     resp.raise_for_status()
     task_id = resp.json()["data"]["taskId"]
 
-    # Ждать готовности
+    # Ждать готовности — опрашиваем статус каждые 5 сек до 60 сек
     for _ in range(12):
-        await asyncio.sleep(10)
+        await asyncio.sleep(5)
         status_resp = await client.get(
             f"https://seller-analytics-api.wildberries.ru/api/v1/warehouse_remains/tasks/{task_id}/status",
             headers=HEADERS,
         )
         status_resp.raise_for_status()
-        status = status_resp.json().get("data", {}).get("status") or status_resp.json().get("status", "")
-        if status in ("done", "complete", "completed"):
+        body = status_resp.json()
+        status = (body.get("data") or {}).get("status") or body.get("status") or ""
+        print(f"[DEBUG] stock status: {status}")
+        if status in ("done", "complete", "completed", "finish", "finished"):
             break
 
     # Скачать отчёт
