@@ -314,42 +314,90 @@ async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
 
 async def get_ai_summary(client: httpx.AsyncClient) -> str:
     lines = []
+    nm_ids = []
 
-    # Продажи за 2 дня
+    # Карточки
     try:
         nm_ids = await get_cards(client)
+    except Exception:
+        pass
+
+    # Продажи за 2 дня + топ товаров
+    try:
         rows = await get_sales_history(client, nm_ids, msk_date(2), msk_date(1))
+        d1, d2 = msk_date(1), msk_date(2)
         day1_sum = day2_sum = day1_cnt = day2_cnt = 0
-        d1 = msk_date(1)
-        d2 = msk_date(2)
+        top_d1: dict = {}
         for row in rows:
+            product = row.get("product") or {}
+            vendor = product.get("vendorCode") or str(product.get("nmId") or "?")
             for day in (row.get("history") or []):
                 date = str(day.get("date") or "")
                 s = float(day.get("ordersSumRub") or 0)
                 c = int(day.get("ordersCount") or 0)
                 if date == d1:
                     day1_sum += s; day1_cnt += c
+                    if vendor not in top_d1:
+                        top_d1[vendor] = {"count": 0, "sum": 0}
+                    top_d1[vendor]["count"] += c
+                    top_d1[vendor]["sum"] += s
                 elif date == d2:
                     day2_sum += s; day2_cnt += c
+        diff = day1_sum - day2_sum
         lines.append(f"ПРОДАЖИ:")
         lines.append(f"  Вчера ({msk_label(1)}): {int(day1_sum)} ₽, {day1_cnt} заказов")
         lines.append(f"  Позавчера ({msk_label(2)}): {int(day2_sum)} ₽, {day2_cnt} заказов")
-        diff = day1_sum - day2_sum
-        lines.append(f"  Изменение: {'+' if diff>=0 else ''}{int(diff)} ₽")
+        lines.append(f"  Динамика: {'+' if diff >= 0 else ''}{int(diff)} ₽")
+        top5 = sorted(top_d1.items(), key=lambda x: -x[1]["count"])[:5]
+        if top5:
+            lines.append(f"  ТОП товаров вчера:")
+            for v, d in top5:
+                lines.append(f"    {v}: {d['count']} заказов, {int(d['sum'])} ₽")
     except Exception as e:
         lines.append(f"ПРОДАЖИ: ошибка ({e})")
 
-    # Активные кампании
+    # Воронка карточек (просмотры → корзина → заказы → выкупы)
+    try:
+        funnel = await get_funnel(client, nm_ids)
+        if funnel:
+            lines.append(f"\nВОРОНКА КАРТОЧЕК (7 дней):")
+            funnel_sorted = sorted(funnel, key=lambda x: -int(x.get("openCardCount") or 0))
+            for item in funnel_sorted[:10]:
+                vendor = item.get("vendorCode") or str(item.get("nmID") or "?")
+                opens = int(item.get("openCardCount") or 0)
+                cart = int(item.get("addToCartCount") or 0)
+                orders = int(item.get("ordersCount") or 0)
+                buyouts = int(item.get("buyoutsCount") or 0)
+                if opens == 0:
+                    continue
+                cart_pct = round(cart / opens * 100, 1)
+                order_pct = round(orders / cart * 100, 1) if cart else 0
+                buyout_pct = round(buyouts / orders * 100, 1) if orders else 0
+                lines.append(
+                    f"  {vendor}: просм {opens} → корзина {cart} ({cart_pct}%)"
+                    f" → заказы {orders} ({order_pct}%) → выкуп {buyouts} ({buyout_pct}%)"
+                )
+    except Exception as e:
+        lines.append(f"\nВОРОНКА: ошибка ({e})")
+
+    # Реклама с CTR
     try:
         campaigns = await get_active_campaigns(client)
-        lines.append(f"\nРЕКЛАМА (активные кампании: {len(campaigns)}):")
+        lines.append(f"\nРЕКЛАМА (активных кампаний: {len(campaigns)}):")
+        total_ad_spend = sum(c["spend"] for c in campaigns)
         for c in campaigns:
+            ctr = round(c["clicks"] / c["views"] * 100, 2) if c["views"] > 0 else 0
+            drr = round(c["spend"] / c["orders"] if c["orders"] > 0 else 0)
             bal_warn = " ⚠️ НИЗКИЙ БАЛАНС" if c["balance"] < 100 else ""
-            lines.append(f"  {c['name']}: баланс {c['balance']} ₽, затраты {c['spend']} ₽, заказы {c['orders']}{bal_warn}")
+            lines.append(
+                f"  {c['name']}: показы {c['views']}, CTR {ctr}%,"
+                f" заказы {c['orders']}, затраты {c['spend']} ₽, баланс {c['balance']} ₽{bal_warn}"
+            )
+        lines.append(f"  Итого затраты на рекламу: {total_ad_spend} ₽")
     except Exception as e:
         lines.append(f"\nРЕКЛАМА: ошибка ({e})")
 
-    # Финансы
+    # Финансы с маржой
     try:
         fin_rows = await get_finance_report(client)
         sales = commission = logistics = storage = to_pay = 0
@@ -361,12 +409,14 @@ async def get_ai_summary(client: httpx.AsyncClient) -> str:
             doc = str(r.get("doc_type_name") or "")
             if "продажа" in doc.lower():
                 sales += float(r.get("retail_price_withdisc_rub") or 0)
-        lines.append(f"\nФИНАНСЫ (за 7 дней):")
-        lines.append(f"  Продажи: {int(sales)} ₽")
+        margin = round(to_pay / sales * 100, 1) if sales > 0 else 0
+        lines.append(f"\nФИНАНСЫ (7 дней):")
+        lines.append(f"  Выручка (продажи): {int(sales)} ₽")
         lines.append(f"  Комиссия WB: {int(commission)} ₽")
         lines.append(f"  Логистика: {int(logistics)} ₽")
         lines.append(f"  Хранение: {int(storage)} ₽")
         lines.append(f"  К получению: {int(to_pay)} ₽")
+        lines.append(f"  Маржа: {margin}%")
     except Exception as e:
         lines.append(f"\nФИНАНСЫ: ошибка ({e})")
 
