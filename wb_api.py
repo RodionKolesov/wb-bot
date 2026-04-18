@@ -328,27 +328,73 @@ async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
 
     return products
 
-# ─── ЕЖЕНЕДЕЛЬНЫЕ ВЫПЛАТЫ (новый Finance API) ────────────────────────────────
+# ─── ЕЖЕНЕДЕЛЬНЫЕ ВЫПЛАТЫ ────────────────────────────────────────────────────
 
 async def get_weekly_payments(client: httpx.AsyncClient) -> list:
-    headers = {"Authorization": FINANCE_HEADERS.get("Authorization", "")}
-    resp = await client.post(
-        "https://finance-api.wildberries.ru/api/finance/v1/sales-reports/list",
-        json={
-            "dateFrom": msk_date(35),
-            "dateTo":   msk_date(0),
-            "limit": 1000,
-            "offset": 0,
-            "period": "weekly",
-        },
-        headers=headers,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if isinstance(data, list):
-        return data
-    return data.get("data") or data.get("reports") or data.get("items") or []
+    token = FINANCE_HEADERS.get("Authorization", "")
+    # Пробуем Finance API с обоими вариантами заголовка
+    for auth_headers in [{"HeaderApiKey": token}, {"Authorization": token}]:
+        try:
+            resp = await client.post(
+                "https://finance-api.wildberries.ru/api/finance/v1/sales-reports/list",
+                json={"dateFrom": msk_date(35), "dateTo": msk_date(0), "limit": 1000, "offset": 0, "period": "weekly"},
+                headers=auth_headers,
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                rows = data if isinstance(data, list) else (data.get("data") or data.get("reports") or data.get("items") or [])
+                if rows:
+                    return rows
+        except Exception:
+            pass
+    # Fallback: 4 отдельных запроса по неделям через reportDetailByPeriod
+    return await _get_weekly_payments_fallback(client)
+
+async def _get_weekly_payments_fallback(client: httpx.AsyncClient) -> list:
+    from datetime import date, timedelta
+    today = date.today()
+    last_monday = today - timedelta(days=today.weekday())
+    results = []
+    for w in range(1, 5):
+        week_end   = last_monday - timedelta(days=1 + 7*(w-1))
+        week_start = week_end - timedelta(days=6)
+        total = 0.0
+        rrdid = 0
+        while True:
+            resp = await client.get(
+                "https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod",
+                params={"dateFrom": str(week_start), "dateTo": str(week_end), "rrdid": rrdid, "limit": 100000},
+                headers=HEADERS,
+                timeout=120,
+            )
+            resp.raise_for_status()
+            if not resp.content or resp.text.strip() in ("", "null", "[]"):
+                break
+            data = resp.json()
+            rows = data if isinstance(data, list) else (data.get("data") or [])
+            if not rows:
+                break
+            rid_totals = {}
+            for r in rows:
+                rid = r.get("realizationreport_id") or 0
+                if not rid:
+                    continue
+                rid_totals[rid] = rid_totals.get(rid, 0.0) + (
+                    float(r.get("ppvz_for_pay") or 0)
+                    - float(r.get("delivery_rub") or 0)
+                    - float(r.get("storage_fee") or 0)
+                    - float(r.get("acceptance") or 0)
+                    - float(r.get("penalty") or 0)
+                    + float(r.get("ppvz_reward") or 0)
+                )
+            total += sum(rid_totals.values())
+            last_rrdid = int(rows[-1].get("rrdid") or rows[-1].get("rrd_id") or 0)
+            if last_rrdid <= rrdid:
+                break
+            rrdid = last_rrdid
+        results.insert(0, {"dateFrom": str(week_start), "dateTo": str(week_end), "forPaySum": total})
+    return results
 
 # ─── AI СВОДКА ───────────────────────────────────────────────────────────────
 
