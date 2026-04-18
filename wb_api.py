@@ -331,8 +331,7 @@ async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
 # ─── ЕЖЕНЕДЕЛЬНЫЕ ВЫПЛАТЫ (новый Finance API) ────────────────────────────────
 
 async def get_weekly_payments(client: httpx.AsyncClient) -> list:
-    # Finance API использует HeaderApiKey, а не Authorization
-    headers = {"HeaderApiKey": FINANCE_HEADERS.get("Authorization", ""), "Content-Type": "application/json"}
+    headers = {"Authorization": FINANCE_HEADERS.get("Authorization", "")}
     resp = await client.post(
         "https://finance-api.wildberries.ru/api/finance/v1/sales-reports/list",
         json={
