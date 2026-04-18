@@ -64,17 +64,19 @@ def format_sales(rows: list) -> str:
 
 def format_campaigns(campaigns: list) -> str:
     if not campaigns:
-        return "📢 Активных кампаний нет."
+        return "📢 Активных кампаний со статистикой нет."
 
-    lines = ["📢 *АКТИВНЫЕ КАМПАНИИ*", ""]
+    lines = ["📢 *КАМПАНИИ WB*", ""]
     low_balance = []
 
     for c in campaigns:
+        ctr = round(c["clicks"] / c["views"] * 100, 2) if c["views"] > 0 else 0
         bal_icon = "🔴" if c["balance"] < 100 else "💰"
-        lines.append(f"*{c['name']}* (ID: {c['id']})")
+        lines.append(f"*{c['name']}*")
         lines.append(f"{bal_icon} Баланс: {fmt(c['balance'])} ₽")
-        lines.append(f"📊 Затраты: {fmt(c['spend'])} ₽ | Показы: {fmt(c['views'])}")
-        lines.append(f"🛒 Заказы: {c['orders']} | CTR: {c['ctr']}%")
+        lines.append(f"💸 Затраты: {fmt(c['spend'])} ₽")
+        lines.append(f"👁 Показы: {fmt(c['views'])} | CTR: {ctr}%")
+        lines.append(f"🛒 Заказы: {c['orders']}")
         lines.append("")
         if c["balance"] < 100:
             low_balance.append(c["name"])

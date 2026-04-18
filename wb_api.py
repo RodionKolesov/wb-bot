@@ -56,27 +56,112 @@ async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_s
     return results
 
 async def get_active_campaigns(client: httpx.AsyncClient) -> list:
-    # Получить все активные кампании
+    # Шаг 1: получить список кампаний сгруппированных по статусу
     r = await client.get(
-        "https://advert-api.wildberries.ru/adv/v1/allact",
+        "https://advert-api.wildberries.ru/adv/v1/promotion/count",
         headers=ADS_HEADERS,
     )
-    print(f"[DEBUG] allact status: {r.status_code}")
-    if r.status_code != 200:
-        raise Exception(f"WB Реклама API вернул {r.status_code}. Убедись что токен имеет доступ к разделу 'Реклама'.")
+    r.raise_for_status()
     data = r.json()
-    print(f"[DEBUG] allact response keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
-    # allact возвращает dict с ключами по типу кампании
-    campaigns = []
-    if isinstance(data, list):
-        campaigns = data
-    elif isinstance(data, dict):
-        for key, val in data.items():
-            if isinstance(val, list):
-                campaigns.extend(val)
 
-    if not campaigns:
-        raise Exception("Активных кампаний не найдено.")
+    # Извлечь только активные (status=9)
+    groups = data.get("adverts") or []
+    campaign_ids = []
+    for group in groups:
+        if group.get("status") == 9:
+            for adv in (group.get("advert_list") or []):
+                adv_id = adv.get("advertId") or adv.get("id")
+                if adv_id:
+                    campaign_ids.append(int(adv_id))
+
+    if not campaign_ids:
+        return []
+
+    # Шаг 2: детали кампаний
+    info_resp = await client.post(
+        "https://advert-api.wildberries.ru/adv/v2/adverts",
+        json={"ids": campaign_ids},
+        headers=ADS_HEADERS,
+    )
+    info_list = []
+    if info_resp.status_code == 200:
+        raw = info_resp.json()
+        info_list = raw if isinstance(raw, list) else (raw.get("data") or [])
+
+    # Шаг 3: статистика за 7 дней (v3!)
+    date_from = msk_date(6)
+    date_to = msk_date(0)
+    ids_str = ",".join(str(i) for i in campaign_ids)
+    stats_resp = await client.get(
+        f"https://advert-api.wildberries.ru/adv/v3/fullstats?ids={ids_str}&beginDate={date_from}&endDate={date_to}",
+        headers=ADS_HEADERS,
+    )
+    stats_list = []
+    if stats_resp.status_code == 200:
+        raw = stats_resp.json()
+        stats_list = raw if isinstance(raw, list) else (raw.get("data") or [])
+
+    # Шаг 4: баланс каждой кампании
+    budgets = {}
+    for camp_id in campaign_ids:
+        try:
+            b_resp = await client.get(
+                "https://advert-api.wildberries.ru/adv/v1/budget",
+                params={"id": camp_id},
+                headers=ADS_HEADERS,
+            )
+            if b_resp.status_code == 200:
+                budgets[camp_id] = float(b_resp.json().get("total") or 0)
+        except Exception:
+            budgets[camp_id] = 0
+
+    # Собрать карты
+    info_by_id = {}
+    for row in info_list:
+        rid = int(row.get("id") or row.get("advertId") or 0)
+        if rid:
+            info_by_id[rid] = row
+
+    stats_by_id = {}
+    for row in stats_list:
+        rid = int(row.get("advertId") or row.get("id") or 0)
+        if not rid:
+            continue
+        views = clicks = orders = 0
+        spend = 0.0
+        views = int(row.get("views") or 0)
+        clicks = int(row.get("clicks") or 0)
+        orders = int(row.get("orders") or 0)
+        spend = float(row.get("sum") or row.get("spend") or 0)
+        if not (views or clicks or orders or spend):
+            for d in (row.get("days") or []):
+                views += int(d.get("views") or 0)
+                clicks += int(d.get("clicks") or 0)
+                orders += int(d.get("orders") or 0)
+                spend += float(d.get("sum") or d.get("spend") or 0)
+        stats_by_id[rid] = {"views": views, "clicks": clicks, "orders": orders, "spend": spend}
+
+    # Собрать итог
+    campaigns = []
+    for camp_id in campaign_ids:
+        info = info_by_id.get(camp_id) or {}
+        stat = stats_by_id.get(camp_id) or {"views": 0, "clicks": 0, "orders": 0, "spend": 0.0}
+        name = (info.get("name") or info.get("advert_name") or
+                (info.get("settings") or {}).get("name") or f"Кампания {camp_id}")
+        campaigns.append({
+            "id": camp_id,
+            "name": name,
+            "balance": round(budgets.get(camp_id, 0)),
+            "views": stat["views"],
+            "clicks": stat["clicks"],
+            "orders": stat["orders"],
+            "spend": round(stat["spend"]),
+        })
+
+    # Только кампании с активностью, сортировка по затратам
+    campaigns = [c for c in campaigns if c["views"] > 0 or c["orders"] > 0 or c["spend"] > 0]
+    campaigns.sort(key=lambda x: -x["spend"])
+    return campaigns
 
     # Для каждой кампании получить баланс и статистику
     result = []
