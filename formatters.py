@@ -126,11 +126,11 @@ def format_income_weeks(reports: list) -> str:
     # Группируем по dateFrom (период), суммируем Основной + По выкупам
     weeks = {}  # dateFrom[:10] -> {total, d_to}
     for r in reports:
-        d_from = str(r.get("dateFrom") or "")[:10]
-        d_to   = str(r.get("dateTo") or "")[:10]
+        d_from = str(r.get("dateFrom") or r.get("date_from") or "")[:10]
+        d_to   = str(r.get("dateTo")   or r.get("date_to")   or "")[:10]
         if not d_from:
             continue
-        amount = float(r.get("forPaySum") or 0)
+        amount = float(r.get("forPaySum") or r.get("for_pay_sum") or 0)
         if d_from not in weeks:
             weeks[d_from] = {"total": 0.0, "d_to": d_to}
         weeks[d_from]["total"] += amount

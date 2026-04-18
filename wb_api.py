@@ -331,20 +331,25 @@ async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
 # ─── ЕЖЕНЕДЕЛЬНЫЕ ВЫПЛАТЫ (новый Finance API) ────────────────────────────────
 
 async def get_weekly_payments(client: httpx.AsyncClient) -> list:
+    # Finance API использует HeaderApiKey, а не Authorization
+    headers = {"HeaderApiKey": FINANCE_HEADERS.get("Authorization", ""), "Content-Type": "application/json"}
     resp = await client.post(
         "https://finance-api.wildberries.ru/api/finance/v1/sales-reports/list",
         json={
-            "dateFrom": msk_date(35) + "T00:00:00",
-            "dateTo":   msk_date(0)  + "T23:59:59",
-            "limit": 20,
+            "dateFrom": msk_date(35),
+            "dateTo":   msk_date(0),
+            "limit": 1000,
             "offset": 0,
+            "period": "weekly",
         },
-        headers=FINANCE_HEADERS,
+        headers=headers,
         timeout=30,
     )
     resp.raise_for_status()
     data = resp.json()
-    return data if isinstance(data, list) else (data.get("data") or data.get("reports") or [])
+    if isinstance(data, list):
+        return data
+    return data.get("data") or data.get("reports") or data.get("items") or []
 
 # ─── AI СВОДКА ───────────────────────────────────────────────────────────────
 
