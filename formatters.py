@@ -121,50 +121,40 @@ def format_campaigns(campaigns: list) -> str:
 # ─── ФИНАНСЫ ─────────────────────────────────────────────────────────────────
 
 def format_finance(rows: list) -> str:
-    sales_sum = returns_sum = logistics = storage = penalties = to_pay = 0
-    sales_count = returns_count = 0
+    sales_sum = commission = logistics = storage = penalties = to_pay = 0
 
     for r in rows:
+        to_pay += float(r.get("ppvz_for_pay") or 0)
+        commission += float(r.get("ppvz_vw") or 0)
+        logistics += float(r.get("delivery_rub") or 0)
+        storage += float(r.get("storage_fee") or 0)
+        penalties += float(r.get("penalty") or 0)
         doc = str(r.get("doc_type_name") or r.get("supplier_oper_name") or "")
-        ppvz = float(r.get("ppvz_for_pay") or 0)
-        delivery = float(r.get("delivery_rub") or 0)
-        stor = float(r.get("storage_fee") or 0)
-        penalty = float(r.get("penalty") or 0)
-        retail = float(r.get("retail_price_withdisc_rub") or 0)
-
-        to_pay += ppvz
-        logistics += delivery
-        storage += stor
-        penalties += penalty
-
         if "продажа" in doc.lower():
-            sales_sum += retail
-            sales_count += int(r.get("quantity") or 1)
-        elif "возврат" in doc.lower():
-            returns_sum += retail
-            returns_count += int(r.get("quantity") or 1)
+            sales_sum += float(r.get("retail_price_withdisc_rub") or 0)
 
-    net = to_pay + logistics  # logistics уже отрицательная в отчёте
+    expenses = commission + logistics + storage + penalties
     label = msk_label(7)
     today = msk_label(1)
+
+    def signed(v):
+        return f"-{fmt(abs(v))}" if v < 0 else fmt(v)
 
     lines = [
         f"💰 *ФИНАНСЫ WB* ({label} — {today})",
         "",
-        f"📦 Продажи: {fmt(sales_sum)} ₽ ({sales_count} шт)",
-        f"↩️ Возвраты: -{fmt(abs(returns_sum))} ₽ ({returns_count} шт)",
-        f"",
-        f"🚚 Логистика: {fmt(logistics)} ₽",
-        f"🏪 Хранение: -{fmt(abs(storage))} ₽",
-        f"⚠️ Штрафы: -{fmt(abs(penalties))} ₽",
-        f"",
-        f"✅ К получению от WB: *{fmt(to_pay)} ₽*",
+        f"📈 Приход: {fmt(sales_sum)} ₽",
+        f"📉 Расход: -{fmt(abs(expenses))} ₽",
+        "",
+        "Детализация:",
+        f"💵 Продажи: {fmt(sales_sum)} ₽",
+        f"🏦 Комиссия WB: {signed(commission)} ₽",
+        f"🚚 Логистика: {signed(logistics)} ₽",
+        f"🏪 Хранение: {signed(storage)} ₽",
+        f"⚠️ Штрафы: {signed(penalties)} ₽",
+        "",
+        f"✅ *Итого к получению: {fmt(to_pay)} ₽*",
     ]
-
-    if returns_sum and sales_sum:
-        ret_pct = round(abs(returns_sum) / sales_sum * 100, 1)
-        lines.append(f"📊 % возврата: {ret_pct}%")
-
     return "\n".join(lines)
 
 # ─── ВОЗВРАТЫ ────────────────────────────────────────────────────────────────

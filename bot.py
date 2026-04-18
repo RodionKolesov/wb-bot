@@ -10,7 +10,7 @@ from aiogram.filters import CommandStart
 import wb_api
 from formatters import (
     format_sales, format_stock, format_campaigns,
-    format_finance, format_returns, format_funnel,
+    format_finance, format_funnel,
     format_ratings, format_abc,
 )
 
@@ -35,7 +35,6 @@ MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
     ],
     [
         InlineKeyboardButton(text="💰 Финансы", callback_data="finance"),
-        InlineKeyboardButton(text="↩️ Возвраты", callback_data="returns"),
         InlineKeyboardButton(text="📈 Воронка", callback_data="funnel"),
     ],
     [
@@ -115,23 +114,6 @@ async def cb_finance(call: CallbackQuery):
         async with httpx.AsyncClient(timeout=120) as client:
             rows = await wb_api.get_finance_report(client)
         text = format_finance(rows)
-        await msg.delete()
-        await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
-    except Exception as e:
-        await msg.delete()
-        await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
-
-# ─── ВОЗВРАТЫ ────────────────────────────────────────────────────────────────
-
-@dp.callback_query(F.data == "returns")
-async def cb_returns(call: CallbackQuery):
-    await call.answer()
-    register_chat(call.message.chat.id)
-    msg = await call.message.answer("⏳ Загружаю возвраты...")
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            rows = await wb_api.get_finance_report(client)
-        text = format_returns(rows)
         await msg.delete()
         await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
     except Exception as e:

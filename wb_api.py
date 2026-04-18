@@ -44,7 +44,7 @@ async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_s
                 "brandNames": [], "subjectIds": [], "tagIds": [],
                 "skipDeletedNm": False,
                 "orderBy": {"field": "ordersSumRub", "mode": "desc"},
-                "limit": 100, "offset": 0,
+                "limit": 20, "offset": 0,
             },
             headers=HEADERS,
         )
@@ -208,20 +208,21 @@ async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
     date_from = msk_date(7)
     date_to = msk_date(1)
     resp = await client.post(
-        "https://seller-analytics-api.wildberries.ru/api/analytics/v2/nm-report/grouped/history",
+        "https://seller-analytics-api.wildberries.ru/api/analytics/v1/nm-report/grouped",
         json={
             "brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": nm_ids,
             "timezone": "Europe/Moscow",
             "period": {"begin": date_from, "end": date_to},
-            "aggregationLevel": "week",
+            "page": 1,
         },
         headers=HEADERS,
     )
     if resp.status_code != 200:
+        print(f"[DEBUG] funnel status: {resp.status_code}, body: {resp.text[:200]}")
         return []
     data = resp.json()
-    history = (data.get("data") or {}).get("history") or data.get("history") or []
-    return history
+    cards = (data.get("data") or {}).get("cards") or data.get("cards") or []
+    return cards
 
 # ─── РЕЙТИНГ И ОТЗЫВЫ ────────────────────────────────────────────────────────
 
