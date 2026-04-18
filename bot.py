@@ -139,7 +139,15 @@ async def cb_finance(call: CallbackQuery):
         await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
     except Exception as e:
         await msg.delete()
-        await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
+        err = str(e)
+        if "401" in err or "403" in err:
+            text = ("❌ Нет доступа к Finance API.\n\n"
+                    "Создай токен с категорией *Финансы* в WB:\n"
+                    "Настройки → Доступ к API → Создать токен → выбрать «Финансы»\n\n"
+                    "Затем добавь в Railway переменную *WB\\_FINANCE\\_KEY*")
+            await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
+        else:
+            await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
 
 # ─── ВОРОНКА ─────────────────────────────────────────────────────────────────
 
