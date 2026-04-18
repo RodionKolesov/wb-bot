@@ -122,18 +122,23 @@ def format_campaigns(campaigns: list) -> str:
 # ─── ПРИХОДЫ ПО НЕДЕЛЯМ ──────────────────────────────────────────────────────
 
 def format_income_weeks(rows: list) -> str:
-    # Группируем по realizationreport_id — строки продаж и логистики/хранения
-    # одного отчёта имеют разные rr_dt, поэтому нельзя группировать по дате
+    # Итого к оплате = ppvz_for_pay - delivery_rub - storage_fee - acceptance + penalty + ppvz_reward
+    # Группируем по realizationreport_id чтобы все строки одного отчёта суммировались вместе
     reports = {}  # rid -> {total, min_date}
     for r in rows:
         rid = r.get("realizationreport_id") or 0
         if not rid:
             continue
-        amount = float(r.get("ppvz_for_pay") or 0)
+        net = (float(r.get("ppvz_for_pay") or 0)
+               - float(r.get("delivery_rub") or 0)
+               - float(r.get("storage_fee") or 0)
+               - float(r.get("acceptance") or 0)
+               + float(r.get("penalty") or 0)
+               + float(r.get("ppvz_reward") or 0))
         raw = str(r.get("rr_dt") or r.get("create_dt") or "")[:10]
         if rid not in reports:
             reports[rid] = {"total": 0.0, "min_date": raw}
-        reports[rid]["total"] += amount
+        reports[rid]["total"] += net
         if raw and raw < reports[rid]["min_date"]:
             reports[rid]["min_date"] = raw
 
