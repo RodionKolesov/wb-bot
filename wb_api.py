@@ -56,28 +56,27 @@ async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_s
     return results
 
 async def get_active_campaigns(client: httpx.AsyncClient) -> list:
-    # Пробуем получить список активных кампаний (status=9)
+    # Получить все активные кампании
+    r = await client.get(
+        "https://advert-api.wildberries.ru/adv/v1/allact",
+        headers=ADS_HEADERS,
+    )
+    print(f"[DEBUG] allact status: {r.status_code}")
+    if r.status_code != 200:
+        raise Exception(f"WB Реклама API вернул {r.status_code}. Убедись что токен имеет доступ к разделу 'Реклама'.")
+    data = r.json()
+    print(f"[DEBUG] allact response keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+    # allact возвращает dict с ключами по типу кампании
     campaigns = []
-    for url, method, body in [
-        ("https://advert-api.wildberries.ru/adv/v1/promotion/adverts?status=9&limit=50&offset=0", "GET", None),
-        ("https://advert-api.wildberries.ru/adv/v2/promotion/adverts?status=9&limit=50&offset=0", "GET", None),
-        ("https://advert-api.wildberries.ru/adv/v1/allact", "GET", None),
-    ]:
-        try:
-            if method == "GET":
-                r = await client.get(url, headers=ADS_HEADERS)
-            else:
-                r = await client.post(url, json=body, headers=ADS_HEADERS)
-            if r.status_code == 200:
-                data = r.json()
-                campaigns = data if isinstance(data, list) else (data.get("adverts") or data.get("data") or [])
-                if campaigns:
-                    break
-        except Exception:
-            continue
+    if isinstance(data, list):
+        campaigns = data
+    elif isinstance(data, dict):
+        for key, val in data.items():
+            if isinstance(val, list):
+                campaigns.extend(val)
 
     if not campaigns:
-        raise Exception("Не удалось получить кампании. Проверь токен WB_ADS_KEY — нужен токен с доступом к разделу 'Реклама'.")
+        raise Exception("Активных кампаний не найдено.")
 
     # Для каждой кампании получить баланс и статистику
     result = []
