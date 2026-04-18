@@ -15,10 +15,16 @@ model = None
 def init_gemini(api_key: str):
     global model
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=SYSTEM_PROMPT,
-    )
+    for model_name in ["gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-pro"]:
+        try:
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction=SYSTEM_PROMPT,
+            )
+            print(f"[AI] Используем модель: {model_name}")
+            break
+        except Exception:
+            continue
 
 def set_context(chat_id: int, context: str):
     _contexts[chat_id] = context
