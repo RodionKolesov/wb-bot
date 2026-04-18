@@ -223,6 +223,43 @@ async def cb_ai(call: CallbackQuery):
         ai_mode.discard(chat_id)
         await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
 
+@dp.message(F.text & F.text.startswith("/debug_finance"))
+async def cmd_debug_finance(message: Message):
+    msg = await message.answer("⏳ Читаю данные API...")
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            rows = await wb_api.get_finance_report(client)
+        # Группируем по realizationreport_id
+        from collections import defaultdict
+        reports = defaultdict(lambda: {"ppvz_for_pay":0,"delivery_rub":0,"storage_fee":0,"acceptance":0,"penalty":0,"ppvz_reward":0,"rr_dt_min":"","rr_dt_max":""})
+        for r in rows:
+            rid = r.get("realizationreport_id") or 0
+            if not rid:
+                continue
+            reports[rid]["ppvz_for_pay"] += float(r.get("ppvz_for_pay") or 0)
+            reports[rid]["delivery_rub"] += float(r.get("delivery_rub") or 0)
+            reports[rid]["storage_fee"] += float(r.get("storage_fee") or 0)
+            reports[rid]["acceptance"] += float(r.get("acceptance") or 0)
+            reports[rid]["penalty"] += float(r.get("penalty") or 0)
+            reports[rid]["ppvz_reward"] += float(r.get("ppvz_reward") or 0)
+            dt = str(r.get("rr_dt") or "")[:10]
+            if dt:
+                if not reports[rid]["rr_dt_min"] or dt < reports[rid]["rr_dt_min"]:
+                    reports[rid]["rr_dt_min"] = dt
+                if dt > reports[rid]["rr_dt_max"]:
+                    reports[rid]["rr_dt_max"] = dt
+        lines = [f"📊 Отчётов: {len(reports)}", ""]
+        for rid, d in sorted(reports.items())[-6:]:
+            net = d["ppvz_for_pay"] - d["delivery_rub"] - d["storage_fee"] - d["acceptance"] - d["penalty"] + d["ppvz_reward"]
+            lines.append(f"ID {rid} ({d['rr_dt_min']}..{d['rr_dt_max']})")
+            lines.append(f"  pay={int(d['ppvz_for_pay'])} del={int(d['delivery_rub'])} sto={int(d['storage_fee'])} acc={int(d['acceptance'])} pen={int(d['penalty'])} rew={int(d['ppvz_reward'])}")
+            lines.append(f"  ➜ net={int(net)}")
+        await msg.delete()
+        await message.answer("\n".join(lines))
+    except Exception as e:
+        await msg.delete()
+        await message.answer(f"❌ {e}")
+
 @dp.message(F.text)
 async def handle_text(message: Message):
     chat_id = message.chat.id
