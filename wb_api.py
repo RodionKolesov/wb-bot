@@ -203,7 +203,12 @@ async def get_finance_report(client: httpx.AsyncClient) -> list:
             timeout=120,
         )
         resp.raise_for_status()
-        data = resp.json()
+        if not resp.content or resp.text.strip() in ("", "null", "[]"):
+            break
+        try:
+            data = resp.json()
+        except Exception:
+            break
         rows = data if isinstance(data, list) else (data.get("data") or [])
         if not rows:
             break
@@ -220,22 +225,24 @@ async def get_finance_report(client: httpx.AsyncClient) -> list:
 async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
     date_from = msk_date(7)
     date_to = msk_date(1)
-    resp = await client.post(
+    body = {
+        "brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": nm_ids,
+        "timezone": "Europe/Moscow",
+        "period": {"begin": date_from, "end": date_to},
+        "page": 1,
+    }
+    for url in [
+        "https://seller-analytics-api.wildberries.ru/api/analytics/v2/nm-report/grouped",
         "https://seller-analytics-api.wildberries.ru/api/analytics/v1/nm-report/grouped",
-        json={
-            "brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": nm_ids,
-            "timezone": "Europe/Moscow",
-            "period": {"begin": date_from, "end": date_to},
-            "page": 1,
-        },
-        headers=HEADERS,
-    )
-    if resp.status_code != 200:
-        print(f"[DEBUG] funnel status: {resp.status_code}, body: {resp.text[:200]}")
-        return []
-    data = resp.json()
-    cards = (data.get("data") or {}).get("cards") or data.get("cards") or []
-    return cards
+    ]:
+        resp = await client.post(url, json=body, headers=HEADERS)
+        print(f"[DEBUG] funnel {url} → {resp.status_code}")
+        if resp.status_code == 200:
+            data = resp.json()
+            cards = (data.get("data") or {}).get("cards") or data.get("cards") or []
+            if cards:
+                return cards
+    return []
 
 # ─── РЕЙТИНГ И ОТЗЫВЫ ────────────────────────────────────────────────────────
 
@@ -270,7 +277,9 @@ async def get_ratings(client: httpx.AsyncClient) -> dict:
 async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
     date_from = msk_date(30)
     date_to = msk_date(1)
+    print(f"[DEBUG] abc: {len(nm_ids)} nmIds, {date_from} → {date_to}")
     rows = await get_sales_history(client, nm_ids, date_from, date_to)
+    print(f"[DEBUG] abc: got {len(rows)} rows")
 
     product_map = {}
     for row in rows:
