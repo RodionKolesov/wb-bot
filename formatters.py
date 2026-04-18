@@ -122,38 +122,22 @@ def format_campaigns(campaigns: list) -> str:
 # ─── ПРИХОДЫ ПО НЕДЕЛЯМ ──────────────────────────────────────────────────────
 
 def format_income_weeks(rows: list) -> str:
-    # Итого к оплате = ppvz_for_pay - delivery_rub - storage_fee - acceptance + penalty + ppvz_reward
-    # Группируем по realizationreport_id чтобы все строки одного отчёта суммировались вместе
-    reports = {}  # rid -> {total, min_date}
-    for r in rows:
-        rid = r.get("realizationreport_id") or 0
-        if not rid:
-            continue
-        net = (float(r.get("ppvz_for_pay") or 0)
-               - float(r.get("delivery_rub") or 0)
-               - float(r.get("storage_fee") or 0)
-               - float(r.get("acceptance") or 0)
-               + float(r.get("penalty") or 0)
-               + float(r.get("ppvz_reward") or 0))
-        raw = str(r.get("rr_dt") or r.get("create_dt") or "")[:10]
-        if rid not in reports:
-            reports[rid] = {"total": 0.0, "min_date": raw}
-        reports[rid]["total"] += net
-        if raw and raw < reports[rid]["min_date"]:
-            reports[rid]["min_date"] = raw
-
-    # Неделю определяем по минимальной дате в отчёте (это дата внутри периода)
+    # WB финализирует отчёт в понедельник после окончания недели (дата формирования = rr_dt).
+    # Финализированные строки: rr_dt = понедельник, ppvz_for_pay уже включает все вычеты.
+    # Неделя расчёта = rr_dt - 7 дней (предыдущая неделя пн–вс).
     weeks = {}
-    for data in reports.values():
-        raw = data["min_date"]
+    for r in rows:
+        raw = str(r.get("rr_dt") or r.get("create_dt") or "")[:10]
         if not raw:
             continue
         try:
             d = datetime.fromisoformat(raw).date()
         except Exception:
             continue
-        monday = d - timedelta(days=d.weekday())
-        weeks[monday] = weeks.get(monday, 0.0) + data["total"]
+        if d.weekday() != 0:  # берём только строки с rr_dt = понедельник
+            continue
+        settlement_monday = d - timedelta(days=7)
+        weeks[settlement_monday] = weeks.get(settlement_monday, 0.0) + float(r.get("ppvz_for_pay") or 0)
 
     sorted_weeks = sorted(weeks.items())[-4:]
     total = sum(v for _, v in sorted_weeks)
