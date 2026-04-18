@@ -209,12 +209,11 @@ async def cb_ai(call: CallbackQuery):
         ai_mode.discard(chat_id)
         await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
 
-@dp.message(F.text & ~F.text.startswith("/"))
+@dp.message(F.text)
 async def handle_text(message: Message):
     chat_id = message.chat.id
     if chat_id not in ai_mode:
         return
-    register_chat(chat_id)
     msg = await message.answer("🤖 Думаю...")
     try:
         answer = await ai_agent.ask(chat_id, message.text)
