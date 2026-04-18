@@ -11,9 +11,11 @@ def msk_label(days_ago: int) -> str:
     return (datetime.now(MSK) - timedelta(days=days_ago)).strftime("%d.%m")
 
 HEADERS = {}
+ADS_HEADERS = {}
 
-def init(api_key: str):
+def init(api_key: str, ads_key: str = None):
     HEADERS["Authorization"] = api_key
+    ADS_HEADERS["Authorization"] = ads_key or api_key
 
 async def get_cards(client: httpx.AsyncClient) -> list[int]:
     resp = await client.post(
@@ -54,34 +56,28 @@ async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_s
     return results
 
 async def get_active_campaigns(client: httpx.AsyncClient) -> list:
-    # Получить активные кампании через v2
-    resp = await client.get(
-        "https://advert-api.wildberries.ru/adv/v2/promotion/count",
-        headers=HEADERS,
-    )
-    resp.raise_for_status()
-    counts = resp.json()
-    # active status = 9, собираем все id активных
-    active_count = 0
-    for item in (counts if isinstance(counts, list) else []):
-        if item.get("status") == 9:
-            active_count = item.get("count", 0)
+    # Пробуем получить список активных кампаний (status=9)
+    campaigns = []
+    for url, method, body in [
+        ("https://advert-api.wildberries.ru/adv/v1/promotion/adverts?status=9&limit=50&offset=0", "GET", None),
+        ("https://advert-api.wildberries.ru/adv/v2/promotion/adverts?status=9&limit=50&offset=0", "GET", None),
+        ("https://advert-api.wildberries.ru/adv/v1/allact", "GET", None),
+    ]:
+        try:
+            if method == "GET":
+                r = await client.get(url, headers=ADS_HEADERS)
+            else:
+                r = await client.post(url, json=body, headers=ADS_HEADERS)
+            if r.status_code == 200:
+                data = r.json()
+                campaigns = data if isinstance(data, list) else (data.get("adverts") or data.get("data") or [])
+                if campaigns:
+                    break
+        except Exception:
+            continue
 
-    # Получить список кампаний по статусу 9
-    resp2 = await client.post(
-        "https://advert-api.wildberries.ru/adv/v1/promotion/adverts",
-        json={"status": 9, "limit": 50, "offset": 0},
-        headers=HEADERS,
-    )
-    if resp2.status_code != 200:
-        # fallback: попробовать allact
-        resp2 = await client.get(
-            "https://advert-api.wildberries.ru/adv/v1/allact",
-            headers=HEADERS,
-        )
-        resp2.raise_for_status()
-    data = resp2.json()
-    campaigns = data if isinstance(data, list) else (data.get("adverts") or data.get("data") or [])
+    if not campaigns:
+        raise Exception("Не удалось получить кампании. Проверь токен WB_ADS_KEY — нужен токен с доступом к разделу 'Реклама'.")
 
     # Для каждой кампании получить баланс и статистику
     result = []
