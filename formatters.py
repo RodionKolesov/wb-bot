@@ -124,40 +124,38 @@ def format_finance(rows: list) -> str:
     sales_sum = commission = logistics = storage = penalties = to_pay = correction = acceptance = 0
 
     for r in rows:
-        to_pay += float(r.get("ppvz_for_pay") or 0)
-        commission += float(r.get("ppvz_vw") or 0)
-        logistics += float(r.get("delivery_rub") or 0)
-        storage += float(r.get("storage_fee") or 0)
-        penalties += float(r.get("penalty") or 0)
-        correction += float(r.get("ppvz_reward") or 0)
-        acceptance += float(r.get("acceptance") or 0)
+        to_pay      += float(r.get("ppvz_for_pay") or 0)
+        commission  += float(r.get("ppvz_vw") or 0)       # приходит < 0 из API
+        logistics   += float(r.get("delivery_rub") or 0)  # приходит > 0 из API (расход)
+        storage     += float(r.get("storage_fee") or 0)   # приходит > 0 из API (расход)
+        penalties   += float(r.get("penalty") or 0)
+        correction  += float(r.get("ppvz_reward") or 0)
+        acceptance  += float(r.get("acceptance") or 0)    # приходит > 0 из API (расход)
         doc = str(r.get("doc_type_name") or r.get("supplier_oper_name") or "")
         if "продажа" in doc.lower():
             sales_sum += float(r.get("retail_price_withdisc_rub") or 0)
 
-    expenses = commission + logistics + storage + penalties + correction + acceptance
+    # комиссия уже отрицательная → abs; остальные расходы положительные → as-is
+    expenses = abs(commission) + logistics + storage + abs(penalties) + abs(acceptance)
     label = msk_label(7)
     today = msk_label(1)
 
-    def signed(v):
-        if v == 0:
-            return "0"
-        return f"-{fmt(abs(v))}" if v < 0 else f"+{fmt(v)}"
+    corr_str = f"+{fmt(correction)}" if correction >= 0 else f"-{fmt(abs(correction))}"
 
     lines = [
         f"💰 *ФИНАНСЫ WB* ({label} — {today})",
         "",
         f"📈 Приход: {fmt(sales_sum)} ₽",
-        f"📉 Расход: -{fmt(abs(expenses))} ₽",
+        f"📉 Расход: -{fmt(expenses)} ₽",
         "",
         "Детализация:",
         f"💵 Продажи: {fmt(sales_sum)} ₽",
-        f"🏦 Комиссия WB: {signed(commission)} ₽",
-        f"🚚 Логистика: {signed(logistics)} ₽",
-        f"🏪 Хранение: {signed(storage)} ₽",
-        f"🔄 Корректировка: {signed(correction)} ₽",
-        f"⚠️ Штрафы: {signed(penalties)} ₽",
-        f"📥 Операции при приёмке: {signed(acceptance)} ₽",
+        f"🏦 Комиссия WB: -{fmt(abs(commission))} ₽",
+        f"🚚 Логистика: -{fmt(logistics)} ₽",
+        f"🏪 Хранение: -{fmt(storage)} ₽",
+        f"🔄 Корректировка: {corr_str} ₽",
+        f"⚠️ Штрафы: -{fmt(abs(penalties))} ₽",
+        f"📥 Операции при приёмке: -{fmt(abs(acceptance))} ₽",
         "",
         f"✅ *Итого к получению: {fmt(to_pay)} ₽*",
     ]

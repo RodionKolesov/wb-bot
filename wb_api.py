@@ -324,6 +324,8 @@ async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
         else:
             p["class"] = "C"
 
+    return products
+
 # ─── AI СВОДКА ───────────────────────────────────────────────────────────────
 
 async def get_ai_summary(client: httpx.AsyncClient) -> str:
@@ -416,24 +418,22 @@ async def get_ai_summary(client: httpx.AsyncClient) -> str:
         fin_rows = await get_finance_report(client)
         sales = commission = logistics = storage = to_pay = 0
         for r in fin_rows:
-            to_pay += float(r.get("ppvz_for_pay") or 0)
-            commission += float(r.get("ppvz_vw") or 0)
-            logistics += float(r.get("delivery_rub") or 0)
-            storage += float(r.get("storage_fee") or 0)
+            to_pay     += float(r.get("ppvz_for_pay") or 0)
+            commission += float(r.get("ppvz_vw") or 0)       # < 0 из API
+            logistics  += float(r.get("delivery_rub") or 0)  # > 0 из API (расход)
+            storage    += float(r.get("storage_fee") or 0)   # > 0 из API (расход)
             doc = str(r.get("doc_type_name") or "")
             if "продажа" in doc.lower():
                 sales += float(r.get("retail_price_withdisc_rub") or 0)
         margin = round(to_pay / sales * 100, 1) if sales > 0 else 0
         lines.append(f"\nФИНАНСЫ (7 дней):")
         lines.append(f"  Выручка (продажи): {int(sales)} ₽")
-        lines.append(f"  Комиссия WB: {int(commission)} ₽")
-        lines.append(f"  Логистика: {int(logistics)} ₽")
-        lines.append(f"  Хранение: {int(storage)} ₽")
+        lines.append(f"  Комиссия WB: -{int(abs(commission))} ₽")
+        lines.append(f"  Логистика: -{int(logistics)} ₽")
+        lines.append(f"  Хранение: -{int(storage)} ₽")
         lines.append(f"  К получению: {int(to_pay)} ₽")
         lines.append(f"  Маржа: {margin}%")
     except Exception as e:
         lines.append(f"\nФИНАНСЫ: ошибка ({e})")
 
     return "\n".join(lines)
-
-    return products
