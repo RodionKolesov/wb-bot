@@ -121,7 +121,7 @@ def format_campaigns(campaigns: list) -> str:
 # ─── ФИНАНСЫ ─────────────────────────────────────────────────────────────────
 
 def format_finance(rows: list) -> str:
-    sales_sum = commission = logistics = storage = penalties = to_pay = 0
+    sales_sum = commission = logistics = storage = penalties = to_pay = correction = acceptance = 0
 
     for r in rows:
         to_pay += float(r.get("ppvz_for_pay") or 0)
@@ -129,16 +129,20 @@ def format_finance(rows: list) -> str:
         logistics += float(r.get("delivery_rub") or 0)
         storage += float(r.get("storage_fee") or 0)
         penalties += float(r.get("penalty") or 0)
+        correction += float(r.get("ppvz_reward") or 0)
+        acceptance += float(r.get("acceptance") or 0)
         doc = str(r.get("doc_type_name") or r.get("supplier_oper_name") or "")
         if "продажа" in doc.lower():
             sales_sum += float(r.get("retail_price_withdisc_rub") or 0)
 
-    expenses = commission + logistics + storage + penalties
+    expenses = commission + logistics + storage + penalties + correction + acceptance
     label = msk_label(7)
     today = msk_label(1)
 
     def signed(v):
-        return f"-{fmt(abs(v))}" if v < 0 else fmt(v)
+        if v == 0:
+            return "0"
+        return f"-{fmt(abs(v))}" if v < 0 else f"+{fmt(v)}"
 
     lines = [
         f"💰 *ФИНАНСЫ WB* ({label} — {today})",
@@ -151,7 +155,9 @@ def format_finance(rows: list) -> str:
         f"🏦 Комиссия WB: {signed(commission)} ₽",
         f"🚚 Логистика: {signed(logistics)} ₽",
         f"🏪 Хранение: {signed(storage)} ₽",
+        f"🔄 Корректировка: {signed(correction)} ₽",
         f"⚠️ Штрафы: {signed(penalties)} ₽",
+        f"📥 Операции при приёмке: {signed(acceptance)} ₽",
         "",
         f"✅ *Итого к получению: {fmt(to_pay)} ₽*",
     ]

@@ -192,15 +192,28 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
 async def get_finance_report(client: httpx.AsyncClient) -> list:
     date_from = msk_date(7)
     date_to = msk_date(1)
-    resp = await client.get(
-        "https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod",
-        params={"dateFrom": date_from, "dateTo": date_to, "rrdid": 0, "limit": 100000},
-        headers=HEADERS,
-        timeout=120,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data if isinstance(data, list) else (data.get("data") or [])
+    all_rows = []
+    rrdid = 0
+
+    while True:
+        resp = await client.get(
+            "https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod",
+            params={"dateFrom": date_from, "dateTo": date_to, "rrdid": rrdid, "limit": 100000},
+            headers=HEADERS,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        rows = data if isinstance(data, list) else (data.get("data") or [])
+        if not rows:
+            break
+        all_rows.extend(rows)
+        last_rrdid = int(rows[-1].get("rrdid") or rows[-1].get("rrd_id") or 0)
+        if last_rrdid <= rrdid:
+            break
+        rrdid = last_rrdid
+
+    return all_rows
 
 # ─── ВОРОНКА ─────────────────────────────────────────────────────────────────
 
