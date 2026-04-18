@@ -190,7 +190,7 @@ async def get_active_campaigns(client: httpx.AsyncClient) -> list:
 # ─── ФИНАНСЫ ─────────────────────────────────────────────────────────────────
 
 async def get_finance_report(client: httpx.AsyncClient) -> list:
-    date_from = msk_date(7)
+    date_from = msk_date(28)
     date_to = msk_date(1)
     all_rows = []
     rrdid = 0

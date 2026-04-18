@@ -1,4 +1,5 @@
 from wb_api import msk_date, msk_label
+from datetime import datetime, timedelta
 
 def fmt(v) -> str:
     return f"{int(v):,}".replace(",", "\u202f")
@@ -116,6 +117,38 @@ def format_campaigns(campaigns: list) -> str:
         lines.append("⚠️ *Пополни баланс:*")
         for name in low_balance:
             lines.append(f"— {name}")
+    return "\n".join(lines)
+
+# ─── ПРИХОДЫ ПО НЕДЕЛЯМ ──────────────────────────────────────────────────────
+
+def format_income_weeks(rows: list) -> str:
+    # Группируем по WB-неделе (воскресенье → суббота) — тогда Основной + По выкупам суммируются
+    weeks = {}  # sunday_date -> total ppvz_for_pay
+    for r in rows:
+        raw = str(r.get("rr_dt") or r.get("create_dt") or "")[:10]
+        if not raw:
+            continue
+        try:
+            d = datetime.fromisoformat(raw).date()
+        except Exception:
+            continue
+        # Найти воскресенье этой недели (WB-неделя: воскресенье–суббота)
+        sunday = d - timedelta(days=(d.weekday() + 1) % 7)
+        weeks[sunday] = weeks.get(sunday, 0.0) + float(r.get("ppvz_for_pay") or 0)
+
+    # Берём последние 4 недели
+    sorted_weeks = sorted(weeks.items())[-4:]
+
+    total = sum(v for _, v in sorted_weeks)
+    lines = ["💵 *ПРИХОДЫ WB — 4 недели*", ""]
+    for i, (sunday, amount) in enumerate(sorted_weeks, 1):
+        saturday = sunday + timedelta(days=6)
+        d_from = sunday.strftime("%d.%m")
+        d_to   = saturday.strftime("%d.%m")
+        lines.append(f"📅 *Неделя {i}:* {d_from} — {d_to}")
+        lines.append(f"   ✅ К получению: *{fmt(amount)} ₽*")
+        lines.append("")
+    lines.append(f"💰 *Итого за месяц: {fmt(total)} ₽*")
     return "\n".join(lines)
 
 # ─── ФИНАНСЫ ─────────────────────────────────────────────────────────────────

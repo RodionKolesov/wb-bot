@@ -11,7 +11,7 @@ import wb_api
 import ai_agent
 from formatters import (
     format_sales, format_stock, format_campaigns,
-    format_finance, format_funnel,
+    format_income_weeks, format_funnel,
     format_ratings, format_abc,
 )
 
@@ -39,7 +39,7 @@ MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
         InlineKeyboardButton(text="📢 Кампании", callback_data="campaigns"),
     ],
     [
-        InlineKeyboardButton(text="💰 Финансы", callback_data="finance"),
+        InlineKeyboardButton(text="💵 Приходы", callback_data="finance"),
         InlineKeyboardButton(text="📈 Воронка", callback_data="funnel"),
     ],
     [
@@ -119,11 +119,11 @@ async def cb_campaigns(call: CallbackQuery):
 async def cb_finance(call: CallbackQuery):
     await call.answer()
     register_chat(call.message.chat.id)
-    msg = await call.message.answer("⏳ Загружаю финансовый отчёт...")
+    msg = await call.message.answer("⏳ Загружаю приходы за 4 недели...")
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             rows = await wb_api.get_finance_report(client)
-        text = format_finance(rows)
+        text = format_income_weeks(rows)
         await msg.delete()
         await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
     except Exception as e:
