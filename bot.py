@@ -51,6 +51,12 @@ MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
     ],
 ])
 
+async def refresh_kb(call: CallbackQuery):
+    try:
+        await call.message.edit_reply_markup(reply_markup=MENU_KB)
+    except Exception:
+        pass
+
 def register_chat(chat_id: int, clear_ai: bool = True):
     user_chat_ids.add(chat_id)
     if clear_ai:
@@ -66,6 +72,7 @@ async def cmd_start(message: Message):
 @dp.callback_query(F.data == "sales")
 async def cb_sales(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     register_chat(call.message.chat.id)
     msg = await call.message.answer("⏳ Загружаю данные по продажам...")
     try:
@@ -84,6 +91,7 @@ async def cb_sales(call: CallbackQuery):
 @dp.callback_query(F.data == "stock")
 async def cb_stock(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     register_chat(call.message.chat.id)
     msg = await call.message.answer("⏳ Формирую отчёт по складу (~30 сек)...")
     try:
@@ -101,6 +109,7 @@ async def cb_stock(call: CallbackQuery):
 @dp.callback_query(F.data == "campaigns")
 async def cb_campaigns(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     register_chat(call.message.chat.id)
     msg = await call.message.answer("⏳ Загружаю кампании...")
     try:
@@ -118,6 +127,7 @@ async def cb_campaigns(call: CallbackQuery):
 @dp.callback_query(F.data == "finance")
 async def cb_finance(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     register_chat(call.message.chat.id)
     msg = await call.message.answer("⏳ Загружаю приходы за 4 недели...")
     try:
@@ -135,6 +145,7 @@ async def cb_finance(call: CallbackQuery):
 @dp.callback_query(F.data == "funnel")
 async def cb_funnel(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     register_chat(call.message.chat.id)
     msg = await call.message.answer("⏳ Загружаю воронку продаж...")
     try:
@@ -153,6 +164,7 @@ async def cb_funnel(call: CallbackQuery):
 @dp.callback_query(F.data == "ratings")
 async def cb_ratings(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     register_chat(call.message.chat.id)
     msg = await call.message.answer("⏳ Загружаю отзывы...")
     try:
@@ -170,6 +182,7 @@ async def cb_ratings(call: CallbackQuery):
 @dp.callback_query(F.data == "abc")
 async def cb_abc(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     register_chat(call.message.chat.id)
     msg = await call.message.answer("⏳ Считаю ABC-анализ за 30 дней...")
     try:
@@ -188,6 +201,7 @@ async def cb_abc(call: CallbackQuery):
 @dp.callback_query(F.data == "ai")
 async def cb_ai(call: CallbackQuery):
     await call.answer()
+    await refresh_kb(call)
     chat_id = call.message.chat.id
     register_chat(chat_id, clear_ai=False)
     ai_mode.add(chat_id)
