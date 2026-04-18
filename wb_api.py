@@ -310,4 +310,66 @@ async def get_abc(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
         else:
             p["class"] = "C"
 
+# ─── AI СВОДКА ───────────────────────────────────────────────────────────────
+
+async def get_ai_summary(client: httpx.AsyncClient) -> str:
+    lines = []
+
+    # Продажи за 2 дня
+    try:
+        nm_ids = await get_cards(client)
+        rows = await get_sales_history(client, nm_ids, msk_date(2), msk_date(1))
+        day1_sum = day2_sum = day1_cnt = day2_cnt = 0
+        d1 = msk_date(1)
+        d2 = msk_date(2)
+        for row in rows:
+            for day in (row.get("history") or []):
+                date = str(day.get("date") or "")
+                s = float(day.get("ordersSumRub") or 0)
+                c = int(day.get("ordersCount") or 0)
+                if date == d1:
+                    day1_sum += s; day1_cnt += c
+                elif date == d2:
+                    day2_sum += s; day2_cnt += c
+        lines.append(f"ПРОДАЖИ:")
+        lines.append(f"  Вчера ({msk_label(1)}): {int(day1_sum)} ₽, {day1_cnt} заказов")
+        lines.append(f"  Позавчера ({msk_label(2)}): {int(day2_sum)} ₽, {day2_cnt} заказов")
+        diff = day1_sum - day2_sum
+        lines.append(f"  Изменение: {'+' if diff>=0 else ''}{int(diff)} ₽")
+    except Exception as e:
+        lines.append(f"ПРОДАЖИ: ошибка ({e})")
+
+    # Активные кампании
+    try:
+        campaigns = await get_active_campaigns(client)
+        lines.append(f"\nРЕКЛАМА (активные кампании: {len(campaigns)}):")
+        for c in campaigns:
+            bal_warn = " ⚠️ НИЗКИЙ БАЛАНС" if c["balance"] < 100 else ""
+            lines.append(f"  {c['name']}: баланс {c['balance']} ₽, затраты {c['spend']} ₽, заказы {c['orders']}{bal_warn}")
+    except Exception as e:
+        lines.append(f"\nРЕКЛАМА: ошибка ({e})")
+
+    # Финансы
+    try:
+        fin_rows = await get_finance_report(client)
+        sales = commission = logistics = storage = to_pay = 0
+        for r in fin_rows:
+            to_pay += float(r.get("ppvz_for_pay") or 0)
+            commission += float(r.get("ppvz_vw") or 0)
+            logistics += float(r.get("delivery_rub") or 0)
+            storage += float(r.get("storage_fee") or 0)
+            doc = str(r.get("doc_type_name") or "")
+            if "продажа" in doc.lower():
+                sales += float(r.get("retail_price_withdisc_rub") or 0)
+        lines.append(f"\nФИНАНСЫ (за 7 дней):")
+        lines.append(f"  Продажи: {int(sales)} ₽")
+        lines.append(f"  Комиссия WB: {int(commission)} ₽")
+        lines.append(f"  Логистика: {int(logistics)} ₽")
+        lines.append(f"  Хранение: {int(storage)} ₽")
+        lines.append(f"  К получению: {int(to_pay)} ₽")
+    except Exception as e:
+        lines.append(f"\nФИНАНСЫ: ошибка ({e})")
+
+    return "\n".join(lines)
+
     return products

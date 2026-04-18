@@ -8,6 +8,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import CommandStart
 
 import wb_api
+import ai_agent
 from formatters import (
     format_sales, format_stock, format_campaigns,
     format_finance, format_funnel,
@@ -19,13 +20,17 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WB_API_KEY = os.getenv("WB_API_KEY")
 WB_ADS_KEY = os.getenv("WB_ADS_KEY") or WB_API_KEY
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 wb_api.init(WB_API_KEY, WB_ADS_KEY)
+if GEMINI_API_KEY:
+    ai_agent.init_gemini(GEMINI_API_KEY)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 user_chat_ids: set[int] = set()
+ai_mode: set[int] = set()  # пользователи в режиме AI-диалога
 
 MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
     [
@@ -41,10 +46,15 @@ MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
         InlineKeyboardButton(text="⭐ Рейтинг", callback_data="ratings"),
         InlineKeyboardButton(text="🏆 ABC", callback_data="abc"),
     ],
+    [
+        InlineKeyboardButton(text="🤖 AI Директор", callback_data="ai"),
+    ],
 ])
 
-def register_chat(chat_id: int):
+def register_chat(chat_id: int, clear_ai: bool = True):
     user_chat_ids.add(chat_id)
+    if clear_ai:
+        ai_mode.discard(chat_id)
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message):
@@ -172,6 +182,51 @@ async def cb_abc(call: CallbackQuery):
     except Exception as e:
         await msg.delete()
         await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
+
+# ─── AI ДИРЕКТОР ─────────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "ai")
+async def cb_ai(call: CallbackQuery):
+    await call.answer()
+    chat_id = call.message.chat.id
+    register_chat(chat_id, clear_ai=False)
+    ai_mode.add(chat_id)
+    msg = await call.message.answer("🤖 Собираю данные магазина для анализа...")
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            summary = await wb_api.get_ai_summary(client)
+        ai_agent.set_context(chat_id, summary)
+        await msg.edit_text("🤖 Анализирую данные...")
+        answer = await ai_agent.ask(chat_id, "")
+        await msg.delete()
+        await call.message.answer(
+            f"🤖 *AI Директор*\n\n{answer}\n\n_Задай любой вопрос текстом. Для выхода нажми другую кнопку._",
+            parse_mode="Markdown",
+            reply_markup=MENU_KB,
+        )
+    except Exception as e:
+        await msg.delete()
+        ai_mode.discard(chat_id)
+        await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
+
+@dp.message(F.text & ~F.text.startswith("/"))
+async def handle_text(message: Message):
+    chat_id = message.chat.id
+    if chat_id not in ai_mode:
+        return
+    register_chat(chat_id)
+    msg = await message.answer("🤖 Думаю...")
+    try:
+        answer = await ai_agent.ask(chat_id, message.text)
+        await msg.delete()
+        await message.answer(
+            f"🤖 {answer}\n\n_Продолжай задавать вопросы или нажми кнопку меню._",
+            parse_mode="Markdown",
+            reply_markup=MENU_KB,
+        )
+    except Exception as e:
+        await msg.delete()
+        await message.answer(f"❌ Ошибка AI: {e}", reply_markup=MENU_KB)
 
 # ─── ФОНОВАЯ ПРОВЕРКА БЮДЖЕТОВ ───────────────────────────────────────────────
 
