@@ -319,26 +319,33 @@ async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
 async def get_ratings(client: httpx.AsyncClient) -> dict:
     result = {"unanswered": 0, "feedbacks": [], "cards": []}
 
-    # Рейтинги карточек и отзывы — параллельно
     card_map = {}
     try:
         card_map = await get_card_map(client)
     except Exception:
         pass
 
-    try:
-        fb_resp = await client.get(
-            "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
-            params={"isAnswered": "false", "take": 50, "skip": 0, "order": "dateDesc"},
-            headers=HEADERS,
-        )
-        if fb_resp.status_code == 200:
-            data = fb_resp.json()
-            feedbacks = (data.get("data") or {}).get("feedbacks") or data.get("feedbacks") or []
-            result["feedbacks"] = feedbacks
-            result["unanswered"] = len(feedbacks)
-    except Exception as e:
-        print(f"[DEBUG] feedbacks error: {e}")
+    # Загружаем все отзывы: и с ответом и без — для расчёта рейтинга
+    all_feedbacks = []
+    unanswered_feedbacks = []
+    for answered in ["false", "true"]:
+        try:
+            resp = await client.get(
+                "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
+                params={"isAnswered": answered, "take": 100, "skip": 0, "order": "dateDesc"},
+                headers=HEADERS,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                fbs = (data.get("data") or {}).get("feedbacks") or data.get("feedbacks") or []
+                all_feedbacks.extend(fbs)
+                if answered == "false":
+                    unanswered_feedbacks = fbs
+        except Exception as e:
+            print(f"[DEBUG] feedbacks {answered}: {e}")
+
+    result["feedbacks"] = unanswered_feedbacks
+    result["unanswered"] = len(unanswered_feedbacks)
 
     try:
         count_resp = await client.get(
@@ -353,12 +360,25 @@ async def get_ratings(client: httpx.AsyncClient) -> dict:
     except Exception:
         pass
 
-    # Сортируем карточки по рейтингу (низкий — первым)
-    result["cards"] = sorted(
-        [v for v in card_map.values() if v["vendorCode"]],
-        key=lambda x: x["rating"]
-    )
+    # Считаем рейтинг по артикулам из загруженных отзывов
+    by_art: dict = {}
+    for f in all_feedbacks:
+        nm_id  = int(f.get("nmId") or f.get("nmID") or 0)
+        vendor = (card_map.get(nm_id) or {}).get("vendorCode") or f.get("subjectName") or "—"
+        val    = f.get("productValuation")
+        if not val:
+            continue
+        if vendor not in by_art:
+            by_art[vendor] = []
+        by_art[vendor].append(int(val))
 
+    cards = []
+    for vendor, vals in by_art.items():
+        avg = round(sum(vals) / len(vals), 1)
+        cards.append({"vendorCode": vendor, "rating": avg, "feedbacksCount": len(vals)})
+
+    # Сортировка: сначала с низким рейтингом
+    result["cards"] = sorted(cards, key=lambda x: x["rating"])
     return result
 
 # ─── ABC-АНАЛИЗ ───────────────────────────────────────────────────────────────
