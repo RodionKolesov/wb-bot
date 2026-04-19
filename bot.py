@@ -322,10 +322,16 @@ async def cb_ai(call: CallbackQuery):
 @dp.message(F.text)
 async def handle_text(message: Message):
     chat_id = message.chat.id
-    if chat_id not in ai_mode:
-        return
+    register_chat(chat_id, clear_ai=False)
     msg = await message.answer("🤖 Думаю...")
     try:
+        # Если контекст магазина ещё не загружен — загружаем автоматически
+        if not ai_agent.has_context(chat_id):
+            await msg.edit_text("🤖 Загружаю данные магазина...")
+            async with httpx.AsyncClient(timeout=90) as client:
+                summary = await wb_api.get_ai_summary(client)
+            ai_agent.set_context(chat_id, summary)
+
         answer = await ai_agent.ask(chat_id, message.text)
         await msg.delete()
         await message.answer(

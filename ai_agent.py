@@ -34,6 +34,9 @@ def set_context(chat_id: int, context: str):
     _contexts[chat_id] = context
     _histories[chat_id] = []
 
+def has_context(chat_id: int) -> bool:
+    return bool(_contexts.get(chat_id))
+
 def clear_history(chat_id: int):
     _histories.pop(chat_id, None)
     _contexts.pop(chat_id, None)
