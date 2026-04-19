@@ -32,6 +32,25 @@ async def get_cards(client: httpx.AsyncClient) -> list[int]:
     cards = data.get("cards") or data.get("data", {}).get("cards") or []
     return list({int(c.get("nmID") or c.get("nmId") or 0) for c in cards if c.get("nmID") or c.get("nmId")})
 
+async def get_card_map(client: httpx.AsyncClient) -> dict:
+    """Возвращает {nmId: {vendorCode, rating, feedbacksCount}}"""
+    resp = await client.post(
+        "https://content-api.wildberries.ru/content/v2/get/cards/list",
+        json={"settings": {"sort": {"ascending": False}, "cursor": {"limit": 100}, "filter": {"withPhoto": -1}}},
+        headers=HEADERS,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    cards = data.get("cards") or data.get("data", {}).get("cards") or []
+    return {
+        int(c.get("nmID") or c.get("nmId") or 0): {
+            "vendorCode":     c.get("vendorCode") or "",
+            "rating":         float(c.get("rating") or 0),
+            "feedbacksCount": int(c.get("feedbacksCount") or 0),
+        }
+        for c in cards if c.get("nmID") or c.get("nmId")
+    }
+
 # ─── ПРОДАЖИ ─────────────────────────────────────────────────────────────────
 
 async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_start: str, date_end: str) -> list:
@@ -298,16 +317,21 @@ async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
 # ─── РЕЙТИНГ И ОТЗЫВЫ ────────────────────────────────────────────────────────
 
 async def get_ratings(client: httpx.AsyncClient) -> dict:
-    result = {"unanswered": 0, "feedbacks": []}
+    result = {"unanswered": 0, "feedbacks": [], "cards": []}
 
-    # Получаем отзывы без ответа напрямую
+    # Рейтинги карточек и отзывы — параллельно
+    card_map = {}
+    try:
+        card_map = await get_card_map(client)
+    except Exception:
+        pass
+
     try:
         fb_resp = await client.get(
             "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
             params={"isAnswered": "false", "take": 50, "skip": 0, "order": "dateDesc"},
             headers=HEADERS,
         )
-        print(f"[DEBUG] feedbacks status: {fb_resp.status_code}")
         if fb_resp.status_code == 200:
             data = fb_resp.json()
             feedbacks = (data.get("data") or {}).get("feedbacks") or data.get("feedbacks") or []
@@ -316,7 +340,6 @@ async def get_ratings(client: httpx.AsyncClient) -> dict:
     except Exception as e:
         print(f"[DEBUG] feedbacks error: {e}")
 
-    # Пробуем также count endpoint для точного числа
     try:
         count_resp = await client.get(
             "https://feedbacks-api.wildberries.ru/api/v1/feedbacks/count-unanswered",
@@ -329,6 +352,12 @@ async def get_ratings(client: httpx.AsyncClient) -> dict:
                 result["unanswered"] = total
     except Exception:
         pass
+
+    # Сортируем карточки по рейтингу (низкий — первым)
+    result["cards"] = sorted(
+        [v for v in card_map.values() if v["vendorCode"]],
+        key=lambda x: x["rating"]
+    )
 
     return result
 

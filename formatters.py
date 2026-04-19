@@ -362,31 +362,39 @@ def format_funnel(history: list) -> str:
 
 def format_ratings(data: dict) -> str:
     unanswered = data.get("unanswered", 0)
-    feedbacks = data.get("feedbacks") or []
+    feedbacks  = data.get("feedbacks") or []
+    cards      = data.get("cards") or []
 
     lines = ["⭐ *ОТЗЫВЫ WB*", ""]
-    lines.append(f"💬 Без ответа: *{unanswered}* отзывов")
-    lines.append("")
+
+    # ── Рейтинг карточек ──
+    if cards:
+        lines.append("*Рейтинг карточек:*")
+        for c in cards:
+            r = c["rating"]
+            cnt = c["feedbacksCount"]
+            warn = " ⚠️" if r > 0 and r < 4.0 else ""
+            stars = f"{r:.1f} ⭐" if r > 0 else "нет оценок"
+            lines.append(f"• *{c['vendorCode']}* — {stars} ({cnt} отз.){warn}")
+        lines.append("")
+
+    # ── Без ответа ──
+    lines.append(f"💬 *Без ответа: {unanswered}*")
 
     if feedbacks:
-        ratings = [f.get("productValuation") or 0 for f in feedbacks if f.get("productValuation")]
-        if ratings:
-            avg = round(sum(ratings) / len(ratings), 1)
-            lines.append(f"Средний рейтинг (последние {len(ratings)}): *{avg}* ⭐")
-            lines.append("")
-
+        lines.append("")
         lines.append("*Последние без ответа:*")
         for f in feedbacks[:5]:
-            rating = f.get("productValuation") or "?"
-            text = (f.get("text") or "").strip()[:80]
+            rating  = f.get("productValuation") or "?"
+            text    = (f.get("text") or "").strip()[:80]
             product = f.get("subjectName") or f.get("productName") or "—"
-            stars = "⭐" * int(rating) if isinstance(rating, int) else ""
+            stars   = "⭐" * int(rating) if isinstance(rating, int) else ""
             lines.append(f"{stars} *{product}*")
             if text:
                 lines.append(f"_{text}_")
             lines.append("")
     else:
-        lines.append("Непрочитанных отзывов нет!")
+        lines.append("\nОтзывов без ответа нет!")
 
     return "\n".join(lines)
 
