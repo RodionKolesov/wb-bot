@@ -38,6 +38,28 @@ def clear_history(chat_id: int):
     _histories.pop(chat_id, None)
     _contexts.pop(chat_id, None)
 
+async def generate_feedback_reply(product: str, rating: int, review: str) -> str:
+    """Одиночный запрос к Groq — генерация ответа на отзыв без сохранения в историю."""
+    if not _api_key:
+        return "❌ GROQ_API_KEY не настроен."
+    prompt = (
+        f"Ты — менеджер WB-магазина. Напиши вежливый профессиональный ответ на отзыв покупателя. "
+        f"2–3 предложения, только русский язык, без вступлений и подписей.\n\n"
+        f"Товар: {product}\nОценка: {rating}/5\nОтзыв: {review}"
+    )
+    messages = [
+        {"role": "system", "content": "Ты менеджер по работе с клиентами интернет-магазина на Wildberries."},
+        {"role": "user",   "content": prompt},
+    ]
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {_api_key}", "Content-Type": "application/json"},
+            json={"model": MODEL, "messages": messages, "max_tokens": 300, "temperature": 0.8},
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+
 async def ask(chat_id: int, question: str) -> str:
     if not _api_key:
         return "❌ GROQ_API_KEY не настроен. Добавь его в переменные Railway."

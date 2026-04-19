@@ -314,6 +314,17 @@ async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
             print(f"[DEBUG] funnel error: {e}")
     return []
 
+# ─── ОТВЕТ НА ОТЗЫВ ──────────────────────────────────────────────────────────
+
+async def reply_to_feedback(client: httpx.AsyncClient, feedback_id: str, text: str) -> bool:
+    resp = await client.patch(
+        "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
+        json={"id": feedback_id, "text": text},
+        headers=HEADERS,
+        timeout=15,
+    )
+    return resp.status_code == 200
+
 # ─── РЕЙТИНГ И ОТЗЫВЫ ────────────────────────────────────────────────────────
 
 async def get_ratings(client: httpx.AsyncClient) -> dict:

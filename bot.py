@@ -31,7 +31,8 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 user_chat_ids: set[int] = set()
-ai_mode: set[int] = set()  # пользователи в режиме AI-диалога
+ai_mode: set[int] = set()
+_reply_states: dict[int, list] = {}  # chat_id → [feedback_dict, ...]
 
 MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
     [
@@ -174,17 +175,102 @@ async def cb_funnel(call: CallbackQuery):
 async def cb_ratings(call: CallbackQuery):
     await call.answer()
     await refresh_kb(call)
-    register_chat(call.message.chat.id)
+    chat_id = call.message.chat.id
+    register_chat(chat_id)
     msg = await call.message.answer("⏳ Загружаю отзывы...")
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             data = await wb_api.get_ratings(client)
         text = format_ratings(data)
         await msg.delete()
         await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
+
+        # Отправляем каждый непрочитанный отзыв с кнопкой «Ответить»
+        feedbacks = data.get("feedbacks") or []
+        if feedbacks:
+            _reply_states[chat_id] = [dict(f) for f in feedbacks[:5]]
+            for i, f in enumerate(feedbacks[:5]):
+                stars   = "⭐" * int(f.get("productValuation") or 0)
+                product = f.get("subjectName") or f.get("productName") or "—"
+                review  = (f.get("text") or "").strip()[:150]
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✍️ Ответить", callback_data=f"reply_{i}")
+                ]])
+                await call.message.answer(
+                    f"{stars} *{product}*\n_{review}_",
+                    parse_mode="Markdown", reply_markup=kb,
+                )
     except Exception as e:
         await msg.delete()
         await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
+
+# ─── ОТВЕТЫ НА ОТЗЫВЫ ────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data.startswith("reply_"))
+async def cb_reply(call: CallbackQuery):
+    await call.answer()
+    chat_id = call.message.chat.id
+    try:
+        idx = int(call.data.split("_")[1])
+    except (IndexError, ValueError):
+        return
+    feedbacks = _reply_states.get(chat_id, [])
+    if idx >= len(feedbacks):
+        await call.message.answer("⚠️ Состояние устарело. Нажми ⭐ Рейтинг заново.")
+        return
+    f = feedbacks[idx]
+    msg = await call.message.answer("🤖 Генерирую ответ...")
+    try:
+        reply_text = await ai_agent.generate_feedback_reply(
+            product=f.get("subjectName") or f.get("productName") or "товар",
+            rating=int(f.get("productValuation") or 5),
+            review=f.get("text") or "",
+        )
+        feedbacks[idx]["_draft"] = reply_text
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Отправить",       callback_data=f"send_reply_{idx}"),
+            InlineKeyboardButton(text="🔄 Другой вариант",  callback_data=f"reply_{idx}"),
+            InlineKeyboardButton(text="⏭ Пропустить",      callback_data=f"skip_reply_{idx}"),
+        ]])
+        await msg.edit_text(
+            f"💬 *Черновик ответа:*\n\n{reply_text}",
+            parse_mode="Markdown", reply_markup=kb,
+        )
+    except Exception as e:
+        await msg.edit_text(f"❌ Ошибка генерации: {e}")
+
+@dp.callback_query(F.data.startswith("send_reply_"))
+async def cb_send_reply(call: CallbackQuery):
+    await call.answer()
+    chat_id = call.message.chat.id
+    try:
+        idx = int(call.data.split("_")[2])
+    except (IndexError, ValueError):
+        return
+    feedbacks = _reply_states.get(chat_id, [])
+    if idx >= len(feedbacks):
+        await call.message.edit_text("⚠️ Состояние устарело.")
+        return
+    f = feedbacks[idx]
+    draft = f.get("_draft", "")
+    feedback_id = f.get("id") or f.get("feedbackId") or ""
+    if not feedback_id:
+        await call.message.edit_text("❌ Не найден ID отзыва.")
+        return
+    try:
+        async with httpx.AsyncClient() as client:
+            ok = await wb_api.reply_to_feedback(client, feedback_id, draft)
+        if ok:
+            await call.message.edit_text("✅ *Ответ отправлен!*", parse_mode="Markdown")
+        else:
+            await call.message.edit_text("❌ WB не принял ответ. Попробуй снова.")
+    except Exception as e:
+        await call.message.edit_text(f"❌ Ошибка: {e}")
+
+@dp.callback_query(F.data.startswith("skip_reply_"))
+async def cb_skip_reply(call: CallbackQuery):
+    await call.answer("Пропущено")
+    await call.message.edit_reply_markup(reply_markup=None)
 
 # ─── ABC ─────────────────────────────────────────────────────────────────────
 
