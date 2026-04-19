@@ -527,6 +527,28 @@ async def _get_weekly_payments_fallback(client: httpx.AsyncClient) -> list:
         for mon, amt in sorted_weeks
     ]
 
+# ─── КУРС ВАЛЮТ (ЦБ РФ) ─────────────────────────────────────────────────────
+
+async def get_exchange_rates(client: httpx.AsyncClient) -> dict:
+    try:
+        resp = await client.get(
+            "https://www.cbr-xml-daily.ru/daily_json.js",
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            valute = data.get("Valute") or {}
+            date   = str(data.get("Date") or "")[:10]
+            return {
+                "date": date,
+                "USD":  round(valute.get("USD", {}).get("Value", 0), 2),
+                "EUR":  round(valute.get("EUR", {}).get("Value", 0), 2),
+                "CNY":  round(valute.get("CNY", {}).get("Value", 0), 2),
+            }
+    except Exception:
+        pass
+    return {}
+
 # ─── AI СВОДКА ───────────────────────────────────────────────────────────────
 
 async def get_ai_summary(client: httpx.AsyncClient) -> str:
@@ -636,5 +658,16 @@ async def get_ai_summary(client: httpx.AsyncClient) -> str:
         lines.append(f"  Маржа: {margin}%")
     except Exception as e:
         lines.append(f"\nФИНАНСЫ: ошибка ({e})")
+
+    # Курс валют
+    try:
+        rates = await get_exchange_rates(client)
+        if rates:
+            lines.append(f"\nКУРС ВАЛЮТ (ЦБ РФ на {rates['date']}):")
+            lines.append(f"  USD: {rates['USD']} ₽")
+            lines.append(f"  EUR: {rates['EUR']} ₽")
+            lines.append(f"  CNY: {rates['CNY']} ₽")
+    except Exception:
+        pass
 
     return "\n".join(lines)
