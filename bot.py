@@ -49,6 +49,7 @@ MENU_KB = InlineKeyboardMarkup(inline_keyboard=[
         InlineKeyboardButton(text="🏆 ABC", callback_data="abc"),
     ],
     [
+        InlineKeyboardButton(text="💱 Курс валют", callback_data="rates"),
         InlineKeyboardButton(text="🤖 AI Директор", callback_data="ai"),
     ],
 ])
@@ -272,6 +273,31 @@ async def cb_send_reply(call: CallbackQuery):
 async def cb_skip_reply(call: CallbackQuery):
     await call.answer("Пропущено")
     await call.message.edit_reply_markup(reply_markup=None)
+
+# ─── КУРС ВАЛЮТ ──────────────────────────────────────────────────────────────
+
+@dp.callback_query(F.data == "rates")
+async def cb_rates(call: CallbackQuery):
+    await call.answer()
+    await refresh_kb(call)
+    register_chat(call.message.chat.id)
+    msg = await call.message.answer("⏳ Загружаю курс валют...")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            rates = await wb_api.get_exchange_rates(client)
+        date = rates.get("date", "—")
+        usd = rates.get("USD", "—")
+        cny = rates.get("CNY", "—")
+        text = (
+            f"💱 *Курс валют ЦБ РФ на {date}*\n\n"
+            f"🇺🇸 Доллар (USD): *{usd} ₽*\n"
+            f"🇨🇳 Юань (CNY): *{cny} ₽*"
+        )
+        await msg.delete()
+        await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
+    except Exception as e:
+        await msg.delete()
+        await call.message.answer(f"❌ Ошибка: {e}", reply_markup=MENU_KB)
 
 # ─── ABC ─────────────────────────────────────────────────────────────────────
 
