@@ -419,17 +419,8 @@ async def check_budgets_loop():
             print(f"[budget check error] {e}")
         await asyncio.sleep(30 * 60)
 
-async def send_test_notification():
-    if user_chat_ids:
-        for chat_id in user_chat_ids:
-            try:
-                await bot.send_message(chat_id, "✅ *Тест уведомлений*\n\nБот перезапущен. Уведомления о низком балансе рекламных кампаний работают!", parse_mode="Markdown")
-            except Exception:
-                pass
-
 async def main():
     asyncio.create_task(check_budgets_loop())
-    await send_test_notification()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
