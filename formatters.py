@@ -282,8 +282,7 @@ def format_weekly_stats(weekly: dict, funnel: list, campaigns: list) -> str:
         for i, (vendor, d) in enumerate(sorted_arts, 1):
             p = prev.get(vendor, {"count": 0, "sum": 0.0})
             growth = _growth(d["sum"], p["sum"])
-            lines.append(f"{i}. *{vendor}*{growth}")
-            lines.append(f"   {d['count']} шт · {fmt(d['sum'])} ₽")
+            lines.append(f"{i}. *{vendor}* — {d['count']} шт · {fmt(d['sum'])} ₽{growth}")
         lines.append("")
     elif not total_cur_cnt:
         lines.append("Заказов за неделю не найдено")
