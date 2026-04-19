@@ -1,4 +1,5 @@
 import asyncio
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 import httpx
 
@@ -530,24 +531,26 @@ async def _get_weekly_payments_fallback(client: httpx.AsyncClient) -> list:
 # ─── КУРС ВАЛЮТ (ЦБ РФ) ─────────────────────────────────────────────────────
 
 async def get_exchange_rates(client: httpx.AsyncClient) -> dict:
+    """Курс валют с официального XML-API ЦБ РФ."""
     try:
         resp = await client.get(
-            "https://www.cbr-xml-daily.ru/daily_json.js",
+            "https://www.cbr.ru/scripts/XML_daily.asp",
             timeout=10,
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            valute = data.get("Valute") or {}
-            date   = str(data.get("Date") or "")[:10]
-            return {
-                "date": date,
-                "USD":  round(valute.get("USD", {}).get("Value", 0), 2),
-                "EUR":  round(valute.get("EUR", {}).get("Value", 0), 2),
-                "CNY":  round(valute.get("CNY", {}).get("Value", 0), 2),
-            }
-    except Exception:
-        pass
-    return {}
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        date = root.get("Date", "")[:10]
+        rates: dict = {"date": date}
+        for v in root.findall("Valute"):
+            code    = v.findtext("CharCode") or ""
+            nominal = int(v.findtext("Nominal") or 1)
+            value   = float((v.findtext("Value") or "0").replace(",", "."))
+            if code in ("USD", "EUR", "CNY"):
+                rates[code] = round(value / nominal, 2)
+        return rates
+    except Exception as e:
+        print(f"[DEBUG] exchange_rates: {e}")
+        return {}
 
 # ─── AI СВОДКА ───────────────────────────────────────────────────────────────
 
