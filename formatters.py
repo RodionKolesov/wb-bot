@@ -247,58 +247,61 @@ def format_weekly_stats(weekly: dict, funnel: list, campaigns: list) -> str:
     prev = weekly.get("previous") or {}
 
     label_start = msk_label(7)
-    label_end = msk_label(1)
+    label_end   = msk_label(1)
 
     total_cur_cnt = sum(v["count"] for v in cur.values())
-    total_cur_sum = sum(v["sum"] for v in cur.values())
+    total_cur_sum = sum(v["sum"]   for v in cur.values())
     total_prev_cnt = sum(v["count"] for v in prev.values())
-    total_prev_sum = sum(v["sum"] for v in prev.values())
-
+    total_prev_sum = sum(v["sum"]   for v in prev.values())
     avg_check = round(total_cur_sum / total_cur_cnt) if total_cur_cnt else 0
 
-    lines = [f"📊 *НЕДЕЛЬНЫЙ ОТЧЁТ* ({label_start} — {label_end})", ""]
+    def _growth(cur, prev):
+        if not prev:
+            return ""
+        pct = (cur - prev) / prev * 100
+        icon = "🟢" if pct >= 0 else "🔴"
+        sign = "+" if pct >= 0 else ""
+        return f" {icon} {sign}{pct:.0f}%"
+
+    lines = [f"📊 *НЕДЕЛЯ {label_start} — {label_end}*", ""]
 
     # ── Итого ──
-    lines.append("💰 *ИТОГО*")
-    lines.append(f"Заказы: *{fmt(total_cur_cnt)} шт*  {_delta(total_cur_cnt, total_prev_cnt)}{_trend(total_cur_cnt, total_prev_cnt)}")
-    lines.append(f"Выручка: *{fmt(total_cur_sum)} ₽*  {_delta(total_cur_sum, total_prev_sum)}{_trend(total_cur_sum, total_prev_sum)}")
+    lines.append(
+        f"🛍 *{fmt(total_cur_cnt)} заказов · {fmt(total_cur_sum)} ₽*"
+        + _growth(total_cur_cnt, total_prev_cnt)
+    )
     if avg_check:
-        lines.append(f"Средний чек: {fmt(avg_check)} ₽")
+        lines.append(f"   Средний чек: {fmt(avg_check)} ₽")
     lines.append("")
 
     # ── По артикулам ──
     active_arts = [(v, d) for v, d in cur.items() if d["count"] > 0 or d["sum"] > 0]
     if active_arts:
-        lines.append("📦 *ПО АРТИКУЛАМ* (неделя / прошлая неделя):")
+        lines.append("*Артикулы:*")
         sorted_arts = sorted(active_arts, key=lambda x: -x[1]["sum"])[:12]
-        for vendor, d in sorted_arts:
+        for i, (vendor, d) in enumerate(sorted_arts, 1):
             p = prev.get(vendor, {"count": 0, "sum": 0.0})
-            d_cnt = _delta(d["count"], p["count"])
-            d_sum = _delta(d["sum"], p["sum"])
-            trend = _trend(d["sum"], p["sum"])
-            lines.append(
-                f"• *{vendor}*: {d['count']} шт ({d_cnt}) · {fmt(d['sum'])} ₽ ({d_sum}){trend}"
-            )
+            growth = _growth(d["sum"], p["sum"])
+            lines.append(f"{i}. *{vendor}*{growth}")
+            lines.append(f"   {d['count']} шт · {fmt(d['sum'])} ₽")
         lines.append("")
     elif not total_cur_cnt:
-        lines.append("📦 Заказов за неделю не найдено")
+        lines.append("Заказов за неделю не найдено")
         lines.append("")
 
     # ── Воронка ──
     if funnel:
-        total_opens = sum(int(i.get("openCardCount") or 0) for i in funnel)
-        total_cart = sum(int(i.get("addToCartCount") or 0) for i in funnel)
-        total_orders = sum(int(i.get("ordersCount") or 0) for i in funnel)
-        total_buyouts = sum(int(i.get("buyoutsCount") or 0) for i in funnel)
+        total_opens   = sum(int(i.get("openCardCount")  or 0) for i in funnel)
+        total_cart    = sum(int(i.get("addToCartCount") or 0) for i in funnel)
+        total_orders  = sum(int(i.get("ordersCount")    or 0) for i in funnel)
+        total_buyouts = sum(int(i.get("buyoutsCount")   or 0) for i in funnel)
         if total_opens:
-            p_cart = round(total_cart / total_opens * 100, 1)
-            p_ord = round(total_orders / total_cart * 100, 1) if total_cart else 0
-            p_buy = round(total_buyouts / total_orders * 100, 1) if total_orders else 0
-            lines.append("🔁 *ВОРОНКА КОНВЕРСИИ* (7 дней)")
-            lines.append(
-                f"👁 {fmt(total_opens)} → 🛒 {fmt(total_cart)} ({p_cart}%)"
-                f" → 📦 {fmt(total_orders)} ({p_ord}%) → ✅ {fmt(total_buyouts)} ({p_buy}%)"
-            )
+            p_cart  = round(total_cart    / total_opens  * 100, 1)
+            p_ord   = round(total_orders  / total_cart   * 100, 1) if total_cart   else 0
+            p_buy   = round(total_buyouts / total_orders * 100, 1) if total_orders else 0
+            lines.append("*Воронка (7 дней):*")
+            lines.append(f"👁 {fmt(total_opens)}  →  🛒 {fmt(total_cart)} ({p_cart}%)")
+            lines.append(f"📦 {fmt(total_orders)} ({p_ord}%)  →  ✅ {fmt(total_buyouts)} ({p_buy}%)")
             lines.append("")
 
     # ── ДРР ──
@@ -307,7 +310,7 @@ def format_weekly_stats(weekly: dict, funnel: list, campaigns: list) -> str:
         if total_spend > 0:
             drr = round(total_spend / total_cur_sum * 100, 1)
             drr_icon = "🟢" if drr < 15 else ("🟡" if drr < 25 else "🔴")
-            lines.append(f"📢 *ДРР: {drr}%*  {drr_icon}  (реклама {fmt(total_spend)} ₽ / выручка {fmt(total_cur_sum)} ₽)")
+            lines.append(f"📢 *ДРР {drr}%* {drr_icon}   реклама {fmt(total_spend)} ₽")
 
     return "\n".join(lines)
 
