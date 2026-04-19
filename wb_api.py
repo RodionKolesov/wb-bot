@@ -371,6 +371,11 @@ async def get_ratings(client: httpx.AsyncClient) -> dict:
     except Exception:
         pass
 
+    # Добавляем vendorCode к каждому отзыву для шаблонов ответов
+    for f in all_feedbacks:
+        nm_id = int(f.get("nmId") or f.get("nmID") or 0)
+        f["_vendorCode"] = (card_map.get(nm_id) or {}).get("vendorCode") or ""
+
     # Считаем рейтинг по артикулам из загруженных отзывов
     by_art: dict = {}
     for f in all_feedbacks:

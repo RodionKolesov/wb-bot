@@ -225,6 +225,7 @@ async def cb_reply(call: CallbackQuery):
             product=f.get("subjectName") or f.get("productName") or "товар",
             rating=int(f.get("productValuation") or 5),
             review=f.get("text") or "",
+            article=f.get("_vendorCode") or "",
         )
         feedbacks[idx]["_draft"] = reply_text
         kb = InlineKeyboardMarkup(inline_keyboard=[[
