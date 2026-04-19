@@ -156,7 +156,11 @@ async def cb_funnel(call: CallbackQuery):
                 wb_api.get_weekly_article_stats(client, nm_ids),
                 wb_api.get_funnel(client, nm_ids),
                 wb_api.get_active_campaigns(client),
+                return_exceptions=True,
             )
+        weekly    = weekly    if isinstance(weekly, dict)  else {"current": {}, "previous": {}}
+        funnel    = funnel    if isinstance(funnel, list)   else []
+        campaigns = campaigns if isinstance(campaigns, list) else []
         text = format_weekly_stats(weekly, funnel, campaigns)
         await msg.delete()
         await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)

@@ -225,11 +225,6 @@ async def get_finance_report(client: httpx.AsyncClient) -> list:
 # ─── НЕДЕЛЬНАЯ СТАТИСТИКА ПО АРТИКУЛАМ ───────────────────────────────────────
 
 async def get_weekly_article_stats(client: httpx.AsyncClient, nm_ids: list[int]) -> dict:
-    cur_rows, prev_rows = await asyncio.gather(
-        get_sales_history(client, nm_ids, msk_date(7), msk_date(1)),
-        get_sales_history(client, nm_ids, msk_date(14), msk_date(8)),
-    )
-
     def _aggregate(rows: list) -> dict:
         out = {}
         for row in rows:
@@ -243,6 +238,18 @@ async def get_weekly_article_stats(client: httpx.AsyncClient, nm_ids: list[int])
                 out[vendor]["count"] += cnt
                 out[vendor]["sum"] += s
         return out
+
+    cur_rows = []
+    prev_rows = []
+    try:
+        cur_rows = await get_sales_history(client, nm_ids, msk_date(7), msk_date(1))
+    except Exception as e:
+        print(f"[DEBUG] weekly current: {e}")
+    try:
+        # Этот эндпоинт ограничен ~7 днями — prev может вернуть 400, тогда дельта = "—"
+        prev_rows = await get_sales_history(client, nm_ids, msk_date(14), msk_date(8))
+    except Exception as e:
+        print(f"[DEBUG] weekly previous (ожидаемо, API ~7 дней): {e}")
 
     return {"current": _aggregate(cur_rows), "previous": _aggregate(prev_rows)}
 
