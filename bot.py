@@ -83,6 +83,20 @@ async def cmd_start(message: Message):
     register_chat(message.chat.id)
     await message.answer("Привет! Выбери отчет.", reply_markup=MENU_KB)
 
+@dp.message(F.text == "/all")
+async def cmd_all(message: Message):
+    if not user_chat_ids:
+        await message.answer("Нет пользователей в базе.")
+        return
+    count = 0
+    for chat_id in user_chat_ids:
+        try:
+            await bot.send_message(chat_id, "📢 *Тестовая рассылка*\n\nЕсли ты видишь это сообщение — уведомления работают!", parse_mode="Markdown")
+            count += 1
+        except Exception:
+            pass
+    await message.answer(f"Отправлено {count} из {len(user_chat_ids)} пользователей.")
+
 # ─── ПРОДАЖИ ─────────────────────────────────────────────────────────────────
 
 @dp.callback_query(F.data == "sales")
