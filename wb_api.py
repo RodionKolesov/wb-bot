@@ -222,6 +222,30 @@ async def get_finance_report(client: httpx.AsyncClient) -> list:
 
     return all_rows
 
+# ─── НЕДЕЛЬНАЯ СТАТИСТИКА ПО АРТИКУЛАМ ───────────────────────────────────────
+
+async def get_weekly_article_stats(client: httpx.AsyncClient, nm_ids: list[int]) -> dict:
+    cur_rows, prev_rows = await asyncio.gather(
+        get_sales_history(client, nm_ids, msk_date(7), msk_date(1)),
+        get_sales_history(client, nm_ids, msk_date(14), msk_date(8)),
+    )
+
+    def _aggregate(rows: list) -> dict:
+        out = {}
+        for row in rows:
+            product = row.get("product") or {}
+            vendor = product.get("vendorCode") or str(product.get("nmId") or product.get("nmID") or "?")
+            for day in (row.get("history") or []):
+                cnt = int(day.get("ordersCount") or 0)
+                s = float(day.get("ordersSumRub") or 0)
+                if vendor not in out:
+                    out[vendor] = {"count": 0, "sum": 0.0}
+                out[vendor]["count"] += cnt
+                out[vendor]["sum"] += s
+        return out
+
+    return {"current": _aggregate(cur_rows), "previous": _aggregate(prev_rows)}
+
 # ─── ВОРОНКА ─────────────────────────────────────────────────────────────────
 
 async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
@@ -352,49 +376,72 @@ async def get_weekly_payments(client: httpx.AsyncClient) -> list:
     return await _get_weekly_payments_fallback(client)
 
 async def _get_weekly_payments_fallback(client: httpx.AsyncClient) -> list:
-    from datetime import date, timedelta
-    today = date.today()
-    last_monday = today - timedelta(days=today.weekday())
-    results = []
-    for w in range(1, 5):
-        week_end   = last_monday - timedelta(days=1 + 7*(w-1))
-        week_start = week_end - timedelta(days=6)
-        total = 0.0
-        rrdid = 0
-        while True:
-            resp = await client.get(
-                "https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod",
-                params={"dateFrom": str(week_start), "dateTo": str(week_end), "rrdid": rrdid, "limit": 100000},
-                headers=HEADERS,
-                timeout=120,
-            )
-            resp.raise_for_status()
-            if not resp.content or resp.text.strip() in ("", "null", "[]"):
-                break
-            data = resp.json()
-            rows = data if isinstance(data, list) else (data.get("data") or [])
-            if not rows:
-                break
-            rid_totals = {}
-            for r in rows:
-                rid = r.get("realizationreport_id") or 0
-                if not rid:
-                    continue
-                rid_totals[rid] = rid_totals.get(rid, 0.0) + (
-                    float(r.get("ppvz_for_pay") or 0)
-                    - float(r.get("delivery_rub") or 0)
-                    - float(r.get("storage_fee") or 0)
-                    - float(r.get("acceptance") or 0)
-                    - float(r.get("penalty") or 0)
-                    + float(r.get("ppvz_reward") or 0)
-                )
-            total += sum(rid_totals.values())
-            last_rrdid = int(rows[-1].get("rrdid") or rows[-1].get("rrd_id") or 0)
-            if last_rrdid <= rrdid:
-                break
-            rrdid = last_rrdid
-        results.insert(0, {"dateFrom": str(week_start), "dateTo": str(week_end), "forPaySum": total})
-    return results
+    # Один запрос за 35 дней — не бьём rate limit и захватываем даты формирования отчётов
+    all_rows = []
+    rrdid = 0
+    while True:
+        resp = await client.get(
+            "https://statistics-api.wildberries.ru/api/v5/supplier/reportDetailByPeriod",
+            params={"dateFrom": msk_date(35), "dateTo": msk_date(0), "rrdid": rrdid, "limit": 100000},
+            headers=HEADERS,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        if not resp.content or resp.text.strip() in ("", "null", "[]"):
+            break
+        data = resp.json()
+        rows = data if isinstance(data, list) else (data.get("data") or [])
+        if not rows:
+            break
+        all_rows.extend(rows)
+        last_rrdid = int(rows[-1].get("rrdid") or rows[-1].get("rrd_id") or 0)
+        if last_rrdid <= rrdid:
+            break
+        rrdid = last_rrdid
+
+    # Группируем по realizationreport_id
+    reports = {}
+    for r in all_rows:
+        rid = r.get("realizationreport_id") or 0
+        if not rid:
+            continue
+        raw = str(r.get("rr_dt") or "")[:10]
+        if not raw:
+            continue
+        try:
+            d = datetime.fromisoformat(raw).date()
+        except Exception:
+            continue
+        if rid not in reports:
+            reports[rid] = {"total": 0.0, "max_date": d}
+        reports[rid]["total"] += (
+            float(r.get("ppvz_for_pay") or 0)
+            - float(r.get("delivery_rub") or 0)
+            - float(r.get("storage_fee") or 0)
+            - float(r.get("acceptance") or 0)
+            - float(r.get("penalty") or 0)
+            + float(r.get("ppvz_reward") or 0)
+        )
+        if d > reports[rid]["max_date"]:
+            reports[rid]["max_date"] = d
+
+    # Определяем неделю по максимальной дате в группе:
+    # если max_date = понедельник (дата формирования) → неделя = max_date - 7 дней
+    # иначе → неделя = начало недели max_date
+    current_monday = datetime.now(MSK).date() - timedelta(days=datetime.now(MSK).weekday())
+    weeks = {}
+    for data in reports.values():
+        mx = data["max_date"]
+        settlement_monday = (mx - timedelta(days=7)) if mx.weekday() == 0 else (mx - timedelta(days=mx.weekday()))
+        if settlement_monday >= current_monday:
+            continue  # текущая незакрытая неделя
+        weeks[settlement_monday] = weeks.get(settlement_monday, 0.0) + data["total"]
+
+    sorted_weeks = sorted(weeks.items())[-4:]
+    return [
+        {"dateFrom": str(mon), "dateTo": str(mon + timedelta(days=6)), "forPaySum": amt}
+        for mon, amt in sorted_weeks
+    ]
 
 # ─── AI СВОДКА ───────────────────────────────────────────────────────────────
 

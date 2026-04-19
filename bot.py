@@ -11,7 +11,7 @@ import wb_api
 import ai_agent
 from formatters import (
     format_sales, format_stock, format_campaigns,
-    format_income_weeks, format_funnel,
+    format_income_weeks, format_funnel, format_weekly_stats,
     format_ratings, format_abc,
 )
 
@@ -148,12 +148,16 @@ async def cb_funnel(call: CallbackQuery):
     await call.answer()
     await refresh_kb(call)
     register_chat(call.message.chat.id)
-    msg = await call.message.answer("⏳ Загружаю воронку продаж...")
+    msg = await call.message.answer("⏳ Собираю недельный отчёт...")
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=90) as client:
             nm_ids = await wb_api.get_cards(client)
-            history = await wb_api.get_funnel(client, nm_ids)
-        text = format_funnel(history)
+            weekly, funnel, campaigns = await asyncio.gather(
+                wb_api.get_weekly_article_stats(client, nm_ids),
+                wb_api.get_funnel(client, nm_ids),
+                wb_api.get_active_campaigns(client),
+            )
+        text = format_weekly_stats(weekly, funnel, campaigns)
         await msg.delete()
         await call.message.answer(text, parse_mode="Markdown", reply_markup=MENU_KB)
     except Exception as e:
