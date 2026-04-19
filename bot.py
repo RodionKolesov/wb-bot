@@ -261,13 +261,10 @@ async def cb_send_reply(call: CallbackQuery):
         return
     try:
         async with httpx.AsyncClient() as client:
-            ok = await wb_api.reply_to_feedback(client, feedback_id, draft)
-        if ok:
-            await call.message.edit_text("✅ *Ответ отправлен!*", parse_mode="Markdown")
-        else:
-            await call.message.edit_text("❌ WB не принял ответ. Попробуй снова.")
+            await wb_api.reply_to_feedback(client, feedback_id, draft)
+        await call.message.edit_text("✅ *Ответ отправлен!*", parse_mode="Markdown")
     except Exception as e:
-        await call.message.edit_text(f"❌ Ошибка: {e}")
+        await call.message.edit_text(f"❌ Ошибка отправки:\n`{e}`", parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("skip_reply_"))
 async def cb_skip_reply(call: CallbackQuery):

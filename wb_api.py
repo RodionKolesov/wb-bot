@@ -324,7 +324,10 @@ async def reply_to_feedback(client: httpx.AsyncClient, feedback_id: str, text: s
         headers=HEADERS,
         timeout=15,
     )
-    return resp.status_code == 200
+    print(f"[reply_to_feedback] id={feedback_id} status={resp.status_code} body={resp.text[:300]}")
+    if resp.status_code != 200:
+        raise RuntimeError(f"WB {resp.status_code}: {resp.text[:200]}")
+    return True
 
 # ─── РЕЙТИНГ И ОТЗЫВЫ ────────────────────────────────────────────────────────
 
