@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import httpx
 from dotenv import load_dotenv
@@ -30,7 +31,20 @@ if GROQ_API_KEY:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-user_chat_ids: set[int] = set()
+USERS_FILE = "users.json"
+
+def _load_users() -> set[int]:
+    try:
+        with open(USERS_FILE) as f:
+            return set(json.load(f))
+    except (FileNotFoundError, ValueError):
+        return set()
+
+def _save_users():
+    with open(USERS_FILE, "w") as f:
+        json.dump(list(user_chat_ids), f)
+
+user_chat_ids: set[int] = _load_users()
 ai_mode: set[int] = set()
 _reply_states: dict[int, list] = {}  # chat_id → [feedback_dict, ...]
 
@@ -60,6 +74,7 @@ async def refresh_kb(call: CallbackQuery):
 
 def register_chat(chat_id: int, clear_ai: bool = True):
     user_chat_ids.add(chat_id)
+    _save_users()
     if clear_ai:
         ai_mode.discard(chat_id)
 
@@ -390,8 +405,17 @@ async def check_budgets_loop():
             print(f"[budget check error] {e}")
         await asyncio.sleep(30 * 60)
 
+async def send_test_notification():
+    if user_chat_ids:
+        for chat_id in user_chat_ids:
+            try:
+                await bot.send_message(chat_id, "✅ *Тест уведомлений*\n\nБот перезапущен. Уведомления о низком балансе рекламных кампаний работают!", parse_mode="Markdown")
+            except Exception:
+                pass
+
 async def main():
     asyncio.create_task(check_budgets_loop())
+    await send_test_notification()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
