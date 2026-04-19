@@ -225,14 +225,26 @@ async def get_finance_report(client: httpx.AsyncClient) -> list:
 # ─── НЕДЕЛЬНАЯ СТАТИСТИКА ПО АРТИКУЛАМ ───────────────────────────────────────
 
 async def get_weekly_article_stats(client: httpx.AsyncClient, nm_ids: list[int]) -> dict:
+    def _num(d: dict, *keys) -> float:
+        for k in keys:
+            v = d.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except Exception:
+                    pass
+        return 0.0
+
     def _aggregate(rows: list) -> dict:
         out = {}
         for row in rows:
             product = row.get("product") or {}
             vendor = product.get("vendorCode") or str(product.get("nmId") or product.get("nmID") or "?")
             for day in (row.get("history") or []):
-                cnt = int(day.get("ordersCount") or 0)
-                s = float(day.get("ordersSumRub") or 0)
+                cnt = int(_num(day, "ordersCount", "orderCount", "orders"))
+                s = _num(day, "ordersSumRub", "ordersSumRUB", "ordersSum", "orderSum", "sumRub")
+                if cnt == 0 and s == 0:
+                    continue
                 if vendor not in out:
                     out[vendor] = {"count": 0, "sum": 0.0}
                 out[vendor]["count"] += cnt

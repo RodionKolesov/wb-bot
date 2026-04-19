@@ -267,9 +267,10 @@ def format_weekly_stats(weekly: dict, funnel: list, campaigns: list) -> str:
     lines.append("")
 
     # ── По артикулам ──
-    if cur:
+    active_arts = [(v, d) for v, d in cur.items() if d["count"] > 0 or d["sum"] > 0]
+    if active_arts:
         lines.append("📦 *ПО АРТИКУЛАМ* (неделя / прошлая неделя):")
-        sorted_arts = sorted(cur.items(), key=lambda x: -x[1]["sum"])[:12]
+        sorted_arts = sorted(active_arts, key=lambda x: -x[1]["sum"])[:12]
         for vendor, d in sorted_arts:
             p = prev.get(vendor, {"count": 0, "sum": 0.0})
             d_cnt = _delta(d["count"], p["count"])
@@ -278,6 +279,9 @@ def format_weekly_stats(weekly: dict, funnel: list, campaigns: list) -> str:
             lines.append(
                 f"• *{vendor}*: {d['count']} шт ({d_cnt}) · {fmt(d['sum'])} ₽ ({d_sum}){trend}"
             )
+        lines.append("")
+    elif not total_cur_cnt:
+        lines.append("📦 Заказов за неделю не найдено")
         lines.append("")
 
     # ── Воронка ──
