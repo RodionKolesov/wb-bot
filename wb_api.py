@@ -56,24 +56,33 @@ async def get_card_map(client: httpx.AsyncClient) -> dict:
 
 async def get_sales_history(client: httpx.AsyncClient, nm_ids: list[int], date_start: str, date_end: str) -> list:
     results = []
-    for i in range(0, len(nm_ids), 20):
-        chunk = nm_ids[i:i+20]
-        resp = await client.post(
-            "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history",
-            json={
-                "selectedPeriod": {"start": date_start, "end": date_end},
-                "nmIds": chunk,
-                "brandNames": [], "subjectIds": [], "tagIds": [],
-                "skipDeletedNm": False,
-                "orderBy": {"field": "ordersSumRub", "mode": "desc"},
-                "limit": 20, "offset": 0,
-            },
-            headers=HEADERS,
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        rows = body if isinstance(body, list) else body.get("data") or []
-        results.extend(rows)
+    chunks = [nm_ids[i:i+20] for i in range(0, len(nm_ids), 20)]
+    for idx, chunk in enumerate(chunks):
+        for attempt in range(5):
+            resp = await client.post(
+                "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products/history",
+                json={
+                    "selectedPeriod": {"start": date_start, "end": date_end},
+                    "nmIds": chunk,
+                    "brandNames": [], "subjectIds": [], "tagIds": [],
+                    "skipDeletedNm": False,
+                    "orderBy": {"field": "ordersSumRub", "mode": "desc"},
+                    "limit": 20, "offset": 0,
+                },
+                headers=HEADERS,
+            )
+            if resp.status_code == 429:
+                retry_after = float(resp.headers.get("Retry-After") or (2 ** attempt) * 5)
+                print(f"[DEBUG] sales-funnel 429, sleep {retry_after}s (attempt {attempt+1}/5)")
+                await asyncio.sleep(retry_after)
+                continue
+            resp.raise_for_status()
+            body = resp.json()
+            rows = body if isinstance(body, list) else body.get("data") or []
+            results.extend(rows)
+            break
+        if idx < len(chunks) - 1:
+            await asyncio.sleep(6)
     return results
 
 # ─── СКЛАД ────────────────────────────────────────────────────────────────────
@@ -318,14 +327,14 @@ async def get_funnel(client: httpx.AsyncClient, nm_ids: list[int]) -> list:
 # ─── ОТВЕТ НА ОТЗЫВ ──────────────────────────────────────────────────────────
 
 async def reply_to_feedback(client: httpx.AsyncClient, feedback_id: str, text: str) -> bool:
-    resp = await client.patch(
-        "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
+    resp = await client.post(
+        "https://feedbacks-api.wildberries.ru/api/v1/feedbacks/answer",
         json={"id": feedback_id, "text": text},
         headers=HEADERS,
         timeout=15,
     )
     print(f"[reply_to_feedback] id={feedback_id} status={resp.status_code} body={resp.text[:300]}")
-    if resp.status_code != 200:
+    if resp.status_code not in (200, 204):
         raise RuntimeError(f"WB {resp.status_code}: {resp.text[:200]}")
     return True
 
